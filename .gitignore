@@ -11,5 +11,6 @@ examples/failing-go-test/.capsule/*
 examples/failing-go-test/.capsule/capsules/*
 !examples/failing-go-test/.capsule/capsules/cap_12a03ebbc337/
 !examples/failing-go-test/.capsule/capsules/cap_12a03ebbc337/**
+examples/failing-go-test/.cache/
 /capsule
 .DS_Store

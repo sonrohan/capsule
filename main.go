@@ -25,7 +25,7 @@ import (
 const capsuleDir = ".capsule"
 
 var (
-	version = "0.1.2"
+	version = "0.1.3"
 	commit  = ""
 	date    = ""
 )

@@ -1,0 +1,31 @@
+version: 2
+
+project_name: capsule
+
+builds:
+  - id: capsule
+    main: .
+    binary: capsule
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+
+universal_binaries:
+  - replace: true
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_Darwin_all"
+
+checksum:
+  name_template: checksums.txt

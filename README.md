@@ -34,35 +34,37 @@ or uncommitted files, those dependencies still need to exist when rerunning.
 
 ## Install
 
-Prerequisite: Go 1.22 or newer.
+macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rohan/capsule/main/install.sh | sh
+capsule --version
+capsule --help
+```
+
+If `capsule` is not found after install, add Capsule's install directory to your
+shell profile and reload the shell:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+exec zsh
+```
+
+Capsule currently publishes prebuilt binaries for macOS only. Linux and Windows
+support are welcome via pull request.
+
+### Build from Source
+
+Requires Go 1.22 or newer.
+
+```sh
+go install github.com/rohan/capsule@latest
+```
 
 From this repository:
 
 ```sh
 make install
-capsule --version
-capsule --help
-```
-
-If `capsule` is not found after install, add Go's bin directory to your shell
-profile and reload the shell:
-
-```sh
-echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
-exec zsh
-```
-
-To build a repo-local binary instead:
-
-```sh
-make build
-./capsule --version
-```
-
-Without `make`:
-
-```sh
-go install .
 ```
 
 ## Quick Start

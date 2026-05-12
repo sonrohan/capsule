@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestArtifactKind(t *testing.T) {
 	cases := map[string]string{
@@ -28,6 +32,33 @@ func TestShortSHA(t *testing.T) {
 	}
 	if got := shortSHA(""); got != "unknown" {
 		t.Fatalf("shortSHA empty returned %q", got)
+	}
+}
+
+func TestVersionString(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	t.Cleanup(func() {
+		version, commit, date = oldVersion, oldCommit, oldDate
+	})
+
+	version, commit, date = "1.2.3", "abc1234", "2026-05-11T12:34:56Z"
+	if got, want := versionString(), "capsule 1.2.3 abc1234 2026-05-11T12:34:56Z"; got != want {
+		t.Fatalf("versionString() = %q, want %q", got, want)
+	}
+
+	version, commit, date = "1.2.3", "", ""
+	if got, want := versionString(), "capsule 1.2.3"; got != want {
+		t.Fatalf("versionString() without build metadata = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultVersionMatchesVersionFile(t *testing.T) {
+	data, err := os.ReadFile("VERSION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := version, strings.TrimSpace(string(data)); got != want {
+		t.Fatalf("default version = %q, VERSION file = %q", got, want)
 	}
 }
 

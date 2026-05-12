@@ -39,6 +39,7 @@ Prerequisite: Go 1.22 or newer. From this repo:
 ```sh
 make install
 capsule --help
+capsule --version
 ```
 
 If `capsule` is not found after install, add Go's bin directory to your shell
@@ -54,6 +55,9 @@ Without `make`, use Go directly:
 ```sh
 go install .
 ```
+
+`capsule version` and `capsule --version` print the installed version so local
+developers can compare their binary against the current release before upgrading.
 
 ## Quick Start
 

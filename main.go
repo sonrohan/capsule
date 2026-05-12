@@ -24,6 +24,12 @@ import (
 
 const capsuleDir = ".capsule"
 
+var (
+	version = "0.1.0"
+	commit  = ""
+	date    = ""
+)
+
 var showRunFailureGuidance = true
 
 type Session struct {
@@ -108,6 +114,8 @@ func main() {
 		err = cmdList()
 	case "ui":
 		err = cmdUI(os.Args[2:])
+	case "version", "-v", "--version":
+		cmdVersion()
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -152,7 +160,23 @@ Usage:
   capsule summary <capsule-id|--last>
   capsule bundle <capsule-id|--last>
   capsule list
-  capsule ui [--port 3000]`)
+  capsule ui [--port 3000]
+  capsule version`)
+}
+
+func cmdVersion() {
+	fmt.Println(versionString())
+}
+
+func versionString() string {
+	parts := []string{"capsule", version}
+	if commit != "" {
+		parts = append(parts, commit)
+	}
+	if date != "" {
+		parts = append(parts, date)
+	}
+	return strings.Join(parts, " ")
 }
 
 func cmdStart() error {
@@ -641,7 +665,8 @@ func collectEnvironment() (Environment, error) {
 	}
 	host, _ := os.Hostname()
 	runtimeVersions := map[string]string{
-		"go": runtime.Version(),
+		"capsule": versionString(),
+		"go":      runtime.Version(),
 	}
 	for _, candidate := range []string{"node", "npm", "java", "javac", "gradle", "docker", "python3", "ruby"} {
 		if version := toolVersion(candidate); version != "" {

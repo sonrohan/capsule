@@ -1,0 +1,3 @@
+display_name: Capsule Release
+short_description: Prepare Capsule release tags.
+default_prompt: Use this skill to prepare or publish a Capsule release.

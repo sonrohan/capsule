@@ -22,11 +22,15 @@ jobs:
         with:
           go-version: stable
 
-      - name: Run GoReleaser
+      - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          install-only: true
+
+      - name: Run release with Capsule evidence
+        run: sh .github/scripts/release_with_capsule.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}

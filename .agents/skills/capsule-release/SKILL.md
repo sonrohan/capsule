@@ -19,7 +19,7 @@ Use this skill from the Capsule repository root.
    git push origin vX.Y.Z
    ```
 
-Pushing the tag triggers `.github/workflows/release.yml`, which runs GoReleaser and publishes the macOS artifact.
+Pushing the tag triggers `.github/workflows/release.yml`, which runs GoReleaser through Capsule, publishes the macOS artifact, then uploads release evidence captured with Capsule.
 
 ## Script
 
@@ -44,6 +44,18 @@ The script:
 - commits `Release vX.Y.Z`
 - creates annotated tag `vX.Y.Z`
 - pushes `main` and the tag only with `--push`
+
+## Release Evidence
+
+The GitHub release workflow uses `.github/scripts/release_with_capsule.sh` to dogfood Capsule during publishing:
+
+- installs the GoReleaser CLI with `goreleaser/goreleaser-action`
+- builds the tagged Capsule source into `.capsule/release-bin/capsule`
+- runs `goreleaser release --clean` via `capsule ci`
+- renames the generated bundle to `dist/capsule_vX.Y.Z_release-evidence.zip`
+- uploads it to the GitHub Release as `Release evidence captured with Capsule`
+
+Treat this bundle as product showcase and release-debugging evidence, not as a cryptographic attestation. Keep it CI-generated so it does not expose local user paths or workstation details.
 
 ## Guardrails
 

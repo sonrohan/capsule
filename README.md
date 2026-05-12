@@ -19,8 +19,8 @@ sensitive execution data.
 The intended sharing unit is a Capsule bundle:
 
 ```sh
-./capsule ci go test ./...
-./capsule bundle --last
+capsule ci go test ./...
+capsule bundle --last
 ```
 
 That creates:
@@ -32,23 +32,49 @@ That creates:
 Attach that zip to CI artifacts, GitHub issues, Slack threads, or bug reports.
 The repo stores source history. Capsule bundles store execution evidence.
 
+## Install for Local Development
+
+Prerequisite: Go 1.22 or newer.
+
+From this repo:
+
+```sh
+make install
+```
+
+That installs the CLI with Go's standard install flow. After that, run it from
+any repo as:
+
+```sh
+capsule --help
+```
+
+If `make install` says your Go bin directory is not on `PATH`, add the printed
+`export PATH=...` line to your shell profile and open a new terminal.
+
+Without `make`, the equivalent command is:
+
+```sh
+go install .
+```
+
 ## MVP Flow
 
 ```sh
-go run . start
-go run . run go test ./...
-go run . finish
-go run . list
-go run . replay <capsule-id>
-go run . summary --last
-go run . bundle --last
-go run . ui
+capsule start
+capsule run go test ./...
+capsule finish
+capsule list
+capsule replay <capsule-id>
+capsule summary --last
+capsule bundle --last
+capsule ui
 ```
 
 For CI-style one-shot capture:
 
 ```sh
-go run . ci go test ./...
+capsule ci go test ./...
 ```
 
 Build a binary:
@@ -60,11 +86,11 @@ go build -o capsule .
 Then use:
 
 ```sh
-./capsule start
-./capsule run ./gradlew test
-./capsule finish
-./capsule replay <capsule-id>
-./capsule ci ./gradlew test
+capsule start
+capsule run ./gradlew test
+capsule finish
+capsule replay <capsule-id>
+capsule ci ./gradlew test
 ```
 
 ## What Capsule Stores

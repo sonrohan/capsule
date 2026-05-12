@@ -23,8 +23,8 @@ Capsule records:
 Then share:
 
 ```sh
-./capsule summary --last
-./capsule bundle --last
+./capsule summary --last --redact
+./capsule bundle --last --redact
 ```
 
 What you paste into Slack or an issue:
@@ -38,7 +38,7 @@ Failed: go test ./...
 Exit code: 1
 Log: .capsule/capsules/cap_abc123/logs/001-combined.log
 Replay: capsule replay cap_abc123 --rerun
-Bundle: .capsule/bundles/cap_abc123.zip
+Bundle: .capsule/bundles/cap_abc123-redacted.zip
 ```
 
 Why this is useful:
@@ -70,7 +70,7 @@ jobs:
       - run: go build -o capsule .
       - run: ./capsule ci go test ./...
       - if: always()
-        run: ./capsule bundle --last || true
+        run: ./capsule bundle --last --redact || true
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -94,8 +94,8 @@ Someone reports a bug that only happens after a specific command sequence.
 ./capsule run npm test
 ./capsule run npm run build
 ./capsule finish
-./capsule summary --last
-./capsule bundle --last
+./capsule summary --last --redact
+./capsule bundle --last --redact
 ```
 
 Why this is useful:
@@ -125,6 +125,43 @@ Why this is useful:
 
 Agents work better with structured state than with prose. Capsule gives the agent
 a deterministic execution record to inspect before making changes.
+
+## Scenario 5: Repo-Specific Capture Policy
+
+Different projects have different evidence. Keep a `capsule.json` beside the
+project when the defaults are close but not quite right.
+
+For example, a Go project that writes coverage data can add:
+
+```json
+{
+  "artifacts": {
+    "kinds": {
+      "go-coverage": ["**/coverage.out"]
+    },
+    "command_filters": {
+      "go:test": ["go-coverage", "junit-xml", "log"]
+    }
+  },
+  "bundle": {
+    "exclude": ["logs/*-stdout.log", "logs/*-stderr.log"]
+  }
+}
+```
+
+An Android project might keep APKs in local snapshots but leave them out of
+shared bundles:
+
+```json
+{
+  "capture": {
+    "max_artifact_bytes": 52428800
+  },
+  "bundle": {
+    "exclude": ["artifacts/**/*.apk"]
+  }
+}
+```
 
 ## Why Not Commit `.capsule/`?
 

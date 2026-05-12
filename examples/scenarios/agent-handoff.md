@@ -7,12 +7,12 @@ When a run fails:
 
 ```sh
 capsule ci go test ./...
-capsule agent --last
+capsule agent --last --redact
 capsule bundle --last --redact
 ```
 
-`capsule agent --last` produces a ready-to-paste brief that tells the agent to
-start from recorded evidence instead of from prose:
+`capsule agent --last --redact` produces a ready-to-paste brief that tells the
+agent to start from recorded evidence instead of from prose:
 
 ```text
 Debug this Capsule run.

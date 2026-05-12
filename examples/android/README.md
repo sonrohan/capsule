@@ -38,6 +38,10 @@ The session ran these commands from `examples/android`:
 ../../capsule finish
 ```
 
+This directory also includes a sample `capsule.json`. It keeps the default
+Android artifact detection, caps captured artifact size, and excludes APK files
+from shared bundles while leaving them available in local snapshots.
+
 All three Gradle commands exited successfully:
 
 ```text

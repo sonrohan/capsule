@@ -4,11 +4,11 @@ Use Capsule when a command fails and you want to share the full repro context.
 
 ```sh
 ./capsule ci go test ./...
-./capsule summary --last
-./capsule bundle --last
+./capsule summary --last --redact
+./capsule bundle --last --redact
 ```
 
-Send the summary and `.capsule/bundles/<id>.zip` to another developer.
+Send the summary and `.capsule/bundles/<id>-redacted.zip` to another developer.
 
 They can inspect:
 

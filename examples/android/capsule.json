@@ -1,0 +1,18 @@
+{
+  "capture": {
+    "max_artifact_bytes": 52428800
+  },
+  "bundle": {
+    "exclude": [
+      "artifacts/**/*.apk"
+    ]
+  },
+  "redaction": {
+    "defaults": true,
+    "files": {
+      "exclude": [
+        "artifacts/**/*.html"
+      ]
+    }
+  }
+}

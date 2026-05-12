@@ -31,6 +31,10 @@ examples/failing-go-test/.capsule/capsules/cap_12a03ebbc337/
 This committed fixture was imported from a redacted bundle, so local host and
 path data are removed while the failure evidence stays intact.
 
+This directory includes a small `capsule.json` showing how a Go repo can add a
+custom `go-coverage` artifact kind and omit separate stdout/stderr logs from
+shared bundles while keeping the combined log.
+
 ## Recorded Command
 
 The snapshot captured one command:
@@ -70,7 +74,7 @@ If you want to record a fresh run instead of using the committed fixture:
 
 ```sh
 ../../capsule ci go test ./...
-../../capsule summary --last
-../../capsule agent --last
+../../capsule summary --last --redact
+../../capsule agent --last --redact
 ../../capsule bundle --last --redact
 ```

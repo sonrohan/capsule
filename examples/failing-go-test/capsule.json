@@ -1,0 +1,22 @@
+{
+  "artifacts": {
+    "kinds": {
+      "go-coverage": [
+        "**/coverage.out"
+      ]
+    },
+    "command_filters": {
+      "go:test": [
+        "go-coverage",
+        "junit-xml",
+        "log"
+      ]
+    }
+  },
+  "bundle": {
+    "exclude": [
+      "logs/*-stdout.log",
+      "logs/*-stderr.log"
+    ]
+  }
+}

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"archive/zip"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestArtifactKind(t *testing.T) {
@@ -92,4 +96,196 @@ func TestFirstFailedCommand(t *testing.T) {
 	if failed.Index != 2 {
 		t.Fatalf("failed command index = %d, want 2", failed.Index)
 	}
+}
+
+func TestAgentBriefingIncludesFailedCommand(t *testing.T) {
+	session := Session{
+		ID: "cap_demo",
+		Git: GitMetadata{
+			SHA:    "abcdef1234567890",
+			Branch: "main",
+		},
+		Commands: []CommandRecord{
+			{Index: 1, Command: "go test ./...", ExitCode: 1, Logs: CommandLogs{Combined: "logs/001-combined.log"}},
+		},
+		Artifacts: []ArtifactRecord{
+			{Path: "reports/junit.xml", Kind: "junit-xml"},
+		},
+	}
+
+	text := agentBriefing(session, false)
+	for _, want := range []string{
+		"Debug this Capsule run.",
+		"Failed command: go test ./...",
+		"Exit code: 1",
+		"Primary log: .capsule/capsules/cap_demo/logs/001-combined.log",
+		"- reports/junit.xml (junit-xml)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("agent briefing missing %q\n%s", want, text)
+		}
+	}
+}
+
+func TestCreateBundleRedactsSensitiveContent(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+	t.Setenv("HOME", "/Users/alice")
+
+	finished := time.Now()
+	session := Session{
+		ID:         "cap_redact",
+		StartedAt:  finished.Add(-time.Minute),
+		FinishedAt: &finished,
+		Git: GitMetadata{
+			SHA:        "abcdef1234567890",
+			Branch:     "main",
+			Repository: "/Users/alice/repos/demo",
+		},
+		Environment: Environment{
+			Hostname: "Alice-MBP.local",
+			User:     "alice",
+			CWD:      "/Users/alice/repos/demo",
+			Shell:    "/bin/zsh",
+			Runtime: map[string]string{
+				"node": "v22.0.0",
+			},
+		},
+		Commands: []CommandRecord{
+			{
+				Index:    1,
+				Args:     []string{"go", "test", "./..."},
+				Command:  "API_KEY=sk_abcd1234567890 go test ./...",
+				ExitCode: 1,
+				Logs: CommandLogs{
+					Combined: "logs/001-combined.log",
+				},
+			},
+		},
+		Artifacts: []ArtifactRecord{
+			{
+				Path:        "reports/failure.txt",
+				CapsulePath: "artifacts/001-failure.txt",
+				Kind:        "log",
+			},
+		},
+	}
+	snapshot := capsuleSnapshotDir(session.ID)
+	if err := ensureDirs(filepath.Join(snapshot, "logs"), filepath.Join(snapshot, "artifacts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSnapshotFiles(snapshot, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "logs", "001-combined.log"), []byte("alice /Users/alice/repos/demo sk_abcd1234567890\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "artifacts", "001-failure.txt"), []byte("host=Alice-MBP.local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundlePath, err := createBundle(session.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := unzipContents(t, bundlePath)
+	for name, body := range contents {
+		if !strings.HasPrefix(name, "capsule/"+session.ID+"/") {
+			continue
+		}
+		if strings.Contains(body, "alice") || strings.Contains(body, "/Users/alice") || strings.Contains(body, "Alice-MBP.local") || strings.Contains(body, "sk_abcd1234567890") {
+			t.Fatalf("redacted bundle still contains sensitive content in %s: %q", name, body)
+		}
+	}
+	if !strings.Contains(contents["capsule/"+session.ID+"/logs/001-combined.log"], "[REDACTED") {
+		t.Fatal("expected redacted marker in combined log")
+	}
+}
+
+func TestImportBundleRestoresSnapshot(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	session := Session{
+		ID:        "cap_import",
+		StartedAt: time.Now(),
+		Git: GitMetadata{
+			SHA:    "abcdef1234567890",
+			Branch: "main",
+		},
+		Commands: []CommandRecord{
+			{Index: 1, Command: "go test ./...", ExitCode: 1, Logs: CommandLogs{Combined: "logs/001-combined.log"}},
+		},
+	}
+	snapshot := capsuleSnapshotDir(session.ID)
+	if err := ensureDirs(filepath.Join(snapshot, "logs")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSnapshotFiles(snapshot, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "logs", "001-combined.log"), []byte("failed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundlePath, err := createBundle(session.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	importedID, err := importBundle(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if importedID != session.ID {
+		t.Fatalf("imported id = %q, want %q", importedID, session.ID)
+	}
+	if _, err := os.Stat(filepath.Join(snapshot, "manifest.json")); err != nil {
+		t.Fatalf("imported manifest missing: %v", err)
+	}
+}
+
+func unzipContents(t *testing.T, path string) map[string]string {
+	t.Helper()
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	out := make(map[string]string, len(reader.File))
+	for _, file := range reader.File {
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[file.Name] = string(data)
+	}
+	return out
 }

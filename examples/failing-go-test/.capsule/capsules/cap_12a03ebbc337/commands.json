@@ -1,0 +1,20 @@
+[
+  {
+    "index": 1,
+    "args": [
+      "/usr/local/go/bin/go",
+      "test",
+      "./..."
+    ],
+    "command": "/usr/local/go/bin/go test ./...",
+    "started_at": "2026-05-12T08:23:22.198112-07:00",
+    "finished_at": "2026-05-12T08:23:26.799942-07:00",
+    "duration_ms": 4601,
+    "exit_code": 1,
+    "logs": {
+      "stdout": "logs/001-stdout.log",
+      "stderr": "logs/001-stderr.log",
+      "combined": "logs/001-combined.log"
+    }
+  }
+]

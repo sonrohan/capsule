@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -88,6 +89,33 @@ type ArtifactRecord struct {
 	CommandIndex int       `json:"command_index,omitempty"`
 }
 
+type CapsuleView struct {
+	ID               string
+	GitSHA           string
+	GitBranch        string
+	CommandCount     int
+	ArtifactCount    int
+	StartedAt        string
+	FailedCommand    *CommandRecord
+	FailedLogPath    string
+	FailedLogPreview string
+	ReplayCommand    string
+	BundlePath       string
+	AgentBriefing    string
+	Commands         []CommandRecord
+	Artifacts        []ArtifactRecord
+}
+
+type Redactor struct {
+	replacements []stringPair
+	tokenPattern *regexp.Regexp
+}
+
+type stringPair struct {
+	old string
+	new string
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -108,8 +136,12 @@ func main() {
 		err = cmdCI(os.Args[2:])
 	case "summary":
 		err = cmdSummary(os.Args[2:])
+	case "agent":
+		err = cmdAgent(os.Args[2:])
 	case "bundle":
 		err = cmdBundle(os.Args[2:])
+	case "import":
+		err = cmdImport(os.Args[2:])
 	case "list":
 		err = cmdList()
 	case "ui":
@@ -157,8 +189,10 @@ Usage:
   capsule finish
   capsule replay <capsule-id> [--rerun]
   capsule ci <command> [args...]
-  capsule summary <capsule-id|--last>
-  capsule bundle <capsule-id|--last>
+  capsule summary <capsule-id|--last> [--redact]
+  capsule agent <capsule-id|--last> [--redact]
+  capsule bundle <capsule-id|--last> [--redact]
+  capsule import <bundle.zip>
   capsule list
   capsule ui [--port 3000]
   capsule version`)
@@ -399,10 +433,10 @@ func cmdCI(args []string) error {
 
 	fmt.Println()
 	fmt.Println("Capsule CI snapshot ready.")
-	if err := printSummary(session.ID); err != nil {
+	if err := printSummary(session.ID, false); err != nil {
 		return err
 	}
-	bundlePath, err := createBundle(session.ID)
+	bundlePath, err := createBundle(session.ID, false)
 	if err != nil {
 		return err
 	}
@@ -419,23 +453,61 @@ func cmdCI(args []string) error {
 }
 
 func cmdSummary(args []string) error {
+	args, redact, err := parseRedactFlag(args)
+	if err != nil {
+		return err
+	}
 	id, err := capsuleIDFromArgs(args)
 	if err != nil {
 		return err
 	}
-	return printSummary(id)
+	return printSummary(id, redact)
+}
+
+func cmdAgent(args []string) error {
+	args, redact, err := parseRedactFlag(args)
+	if err != nil {
+		return err
+	}
+	id, err := capsuleIDFromArgs(args)
+	if err != nil {
+		return err
+	}
+	session, err := loadCapsule(id)
+	if err != nil {
+		return err
+	}
+	fmt.Print(agentBriefing(session, redact))
+	return nil
 }
 
 func cmdBundle(args []string) error {
+	args, redact, err := parseRedactFlag(args)
+	if err != nil {
+		return err
+	}
 	id, err := capsuleIDFromArgs(args)
 	if err != nil {
 		return err
 	}
-	path, err := createBundle(id)
+	path, err := createBundle(id, redact)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Bundle created: %s\n", path)
+	return nil
+}
+
+func cmdImport(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing bundle path")
+	}
+	id, err := importBundle(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Imported Capsule %s\n", id)
+	fmt.Printf("Snapshot: %s\n", capsuleSnapshotDir(id))
 	return nil
 }
 
@@ -495,28 +567,12 @@ func cmdReplay(args []string) error {
 	return nil
 }
 
-func printSummary(id string) error {
+func printSummary(id string, redact bool) error {
 	session, err := loadCapsule(id)
 	if err != nil {
 		return err
 	}
-	failed := firstFailedCommand(session)
-	fmt.Printf("# Capsule %s\n", session.ID)
-	fmt.Printf("Git: %s on %s\n", fallback(session.Git.SHA, "unknown"), fallback(session.Git.Branch, "unknown"))
-	fmt.Printf("Started: %s\n", session.StartedAt.Format(time.RFC3339))
-	if session.FinishedAt != nil {
-		fmt.Printf("Finished: %s\n", session.FinishedAt.Format(time.RFC3339))
-	}
-	fmt.Printf("Commands: %d\n", len(session.Commands))
-	fmt.Printf("Artifacts: %d\n", len(session.Artifacts))
-	if failed != nil {
-		fmt.Printf("Failed: %s\n", failed.Command)
-		fmt.Printf("Exit code: %d\n", failed.ExitCode)
-		fmt.Printf("Log: %s\n", filepath.Join(capsuleSnapshotDir(session.ID), failed.Logs.Combined))
-	} else {
-		fmt.Println("Failed: none")
-	}
-	fmt.Printf("Replay: capsule replay %s --rerun\n", session.ID)
+	fmt.Print(summaryText(session, redact))
 	return nil
 }
 
@@ -556,7 +612,7 @@ func cmdList() error {
 	return nil
 }
 
-func createBundle(id string) (string, error) {
+func createBundle(id string, redact bool) (string, error) {
 	src := capsuleSnapshotDir(id)
 	if _, err := os.Stat(src); err != nil {
 		return "", err
@@ -565,7 +621,11 @@ func createBundle(id string) (string, error) {
 	if err := ensureDirs(destDir); err != nil {
 		return "", err
 	}
-	dest := filepath.Join(destDir, id+".zip")
+	name := id + ".zip"
+	if redact {
+		name = id + "-redacted.zip"
+	}
+	dest := filepath.Join(destDir, name)
 	out, err := os.Create(dest)
 	if err != nil {
 		return "", err
@@ -575,6 +635,11 @@ func createBundle(id string) (string, error) {
 	zw := zip.NewWriter(out)
 	defer zw.Close()
 	prefix := filepath.Join("capsule", id)
+	session, err := loadCapsule(id)
+	if err != nil {
+		return "", err
+	}
+	redactor := newRedactor(session)
 	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -600,12 +665,14 @@ func createBundle(id string) (string, error) {
 		if err != nil {
 			return err
 		}
-		in, err := os.Open(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		defer in.Close()
-		_, err = io.Copy(writer, in)
+		if redact && shouldRedactFile(rel) {
+			data = []byte(redactor.RedactText(string(data)))
+		}
+		_, err = writer.Write(data)
 		return err
 	})
 	if err != nil {
@@ -635,7 +702,11 @@ func cmdUI(args []string) error {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := uiTemplate.Execute(w, capsules); err != nil {
+		views := make([]CapsuleView, 0, len(capsules))
+		for _, capsule := range capsules {
+			views = append(views, newCapsuleView(capsule))
+		}
+		if err := uiTemplate.Execute(w, views); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	})
@@ -855,6 +926,23 @@ func capsuleIDFromArgs(args []string) (string, error) {
 	return args[0], nil
 }
 
+func parseRedactFlag(args []string) ([]string, bool, error) {
+	var filtered []string
+	redact := false
+	for _, arg := range args {
+		switch arg {
+		case "--redact":
+			redact = true
+		default:
+			if strings.HasPrefix(arg, "--") && arg != "--last" {
+				return nil, false, fmt.Errorf("unknown flag %q", arg)
+			}
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered, redact, nil
+}
+
 func lastCapsuleID() (string, error) {
 	capsules, err := allCapsules()
 	if err != nil {
@@ -873,6 +961,68 @@ func firstFailedCommand(session Session) *CommandRecord {
 		}
 	}
 	return nil
+}
+
+func summaryText(session Session, redact bool) string {
+	if redact {
+		session = redactSession(session)
+	}
+	var b strings.Builder
+	failed := firstFailedCommand(session)
+	fmt.Fprintf(&b, "# Capsule %s\n", session.ID)
+	fmt.Fprintf(&b, "Git: %s on %s\n", fallback(session.Git.SHA, "unknown"), fallback(session.Git.Branch, "unknown"))
+	fmt.Fprintf(&b, "Started: %s\n", session.StartedAt.Format(time.RFC3339))
+	if session.FinishedAt != nil {
+		fmt.Fprintf(&b, "Finished: %s\n", session.FinishedAt.Format(time.RFC3339))
+	}
+	fmt.Fprintf(&b, "Commands: %d\n", len(session.Commands))
+	fmt.Fprintf(&b, "Artifacts: %d\n", len(session.Artifacts))
+	if failed != nil {
+		fmt.Fprintf(&b, "Failed: %s\n", failed.Command)
+		fmt.Fprintf(&b, "Exit code: %d\n", failed.ExitCode)
+		fmt.Fprintf(&b, "Log: %s\n", filepath.Join(capsuleSnapshotDir(session.ID), failed.Logs.Combined))
+	} else {
+		fmt.Fprintln(&b, "Failed: none")
+	}
+	fmt.Fprintf(&b, "Replay: capsule replay %s --rerun\n", session.ID)
+	return b.String()
+}
+
+func agentBriefing(session Session, redact bool) string {
+	if redact {
+		session = redactSession(session)
+	}
+	failed := firstFailedCommand(session)
+	var b strings.Builder
+	fmt.Fprintln(&b, "Debug this Capsule run.")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "Capsule ID: %s\n", session.ID)
+	fmt.Fprintf(&b, "Git SHA: %s\n", fallback(session.Git.SHA, "unknown"))
+	fmt.Fprintf(&b, "Branch: %s\n", fallback(session.Git.Branch, "unknown"))
+	if failed != nil {
+		fmt.Fprintf(&b, "Failed command: %s\n", failed.Command)
+		fmt.Fprintf(&b, "Exit code: %d\n", failed.ExitCode)
+		fmt.Fprintf(&b, "Primary log: %s\n", filepath.Join(capsuleSnapshotDir(session.ID), failed.Logs.Combined))
+	} else {
+		fmt.Fprintln(&b, "Failed command: none")
+	}
+	if session.Git.Dirty {
+		fmt.Fprintln(&b, "Working tree at capture: dirty")
+	} else {
+		fmt.Fprintln(&b, "Working tree at capture: clean")
+	}
+	fmt.Fprintln(&b, "Artifacts:")
+	if len(session.Artifacts) == 0 {
+		fmt.Fprintln(&b, "- none")
+	} else {
+		for _, artifact := range session.Artifacts {
+			fmt.Fprintf(&b, "- %s (%s)\n", artifact.Path, artifact.Kind)
+		}
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Start by reading manifest.json, commands.json, metadata.json, and the combined log before proposing a fix.")
+	fmt.Fprintln(&b, "Do not infer the failure from prose alone; inspect the recorded evidence first.")
+	return b.String()
 }
 
 func writeSnapshotFiles(dest string, session Session) error {
@@ -999,6 +1149,95 @@ func shortSHA(sha string) string {
 	return fallback(sha, "unknown")
 }
 
+func redactSession(session Session) Session {
+	redactor := newRedactor(session)
+	session.Git.Repository = redactor.RedactText(session.Git.Repository)
+	session.Git.Status = redactor.RedactText(session.Git.Status)
+	session.Environment.Hostname = redactor.RedactText(session.Environment.Hostname)
+	session.Environment.User = redactor.RedactText(session.Environment.User)
+	session.Environment.CWD = redactor.RedactText(session.Environment.CWD)
+	session.Environment.Shell = redactor.RedactText(session.Environment.Shell)
+	for key, value := range session.Environment.Runtime {
+		session.Environment.Runtime[key] = redactor.RedactText(value)
+	}
+	for i := range session.Commands {
+		session.Commands[i].Command = redactor.RedactText(session.Commands[i].Command)
+		for j := range session.Commands[i].Args {
+			session.Commands[i].Args[j] = redactor.RedactText(session.Commands[i].Args[j])
+		}
+		session.Commands[i].Logs.Stdout = redactor.RedactText(session.Commands[i].Logs.Stdout)
+		session.Commands[i].Logs.Stderr = redactor.RedactText(session.Commands[i].Logs.Stderr)
+		session.Commands[i].Logs.Combined = redactor.RedactText(session.Commands[i].Logs.Combined)
+		for j := range session.Commands[i].Artifacts {
+			session.Commands[i].Artifacts[j].Path = redactor.RedactText(session.Commands[i].Artifacts[j].Path)
+			session.Commands[i].Artifacts[j].CapsulePath = redactor.RedactText(session.Commands[i].Artifacts[j].CapsulePath)
+		}
+	}
+	for i := range session.Artifacts {
+		session.Artifacts[i].Path = redactor.RedactText(session.Artifacts[i].Path)
+		session.Artifacts[i].CapsulePath = redactor.RedactText(session.Artifacts[i].CapsulePath)
+	}
+	return session
+}
+
+func newRedactor(session Session) Redactor {
+	var replacements []stringPair
+	for _, candidate := range []string{
+		session.Environment.User,
+		session.Environment.Hostname,
+		session.Environment.CWD,
+		session.Git.Repository,
+		os.Getenv("HOME"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		replacements = append(replacements, stringPair{old: candidate, new: "[REDACTED]"})
+	}
+	sort.Slice(replacements, func(i, j int) bool {
+		return len(replacements[i].old) > len(replacements[j].old)
+	})
+	return Redactor{
+		replacements: replacements,
+		tokenPattern: regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|github_pat|sk|rk|pat)_[A-Za-z0-9_\-]{8,}\b`),
+	}
+}
+
+func (r Redactor) RedactText(input string) string {
+	output := input
+	for _, replacement := range r.replacements {
+		output = strings.ReplaceAll(output, replacement.old, replacement.new)
+	}
+	output = strings.ReplaceAll(output, "/Users/[REDACTED]", "[REDACTED]")
+	output = strings.ReplaceAll(output, "/home/[REDACTED]", "[REDACTED]")
+	output = r.tokenPattern.ReplaceAllString(output, "[REDACTED_TOKEN]")
+	return output
+}
+
+func shouldRedactFile(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	base := filepath.Base(rel)
+	switch {
+	case strings.HasPrefix(rel, "logs/"):
+		return true
+	case strings.HasPrefix(rel, "artifacts/"):
+		return isTextPath(base)
+	default:
+		return base == "manifest.json" || base == "commands.json" || base == "metadata.json" || base == "session.json"
+	}
+}
+
+func isTextPath(name string) bool {
+	lower := strings.ToLower(name)
+	for _, ext := range []string{".json", ".log", ".txt", ".xml", ".html", ".md", ".yaml", ".yml", ".csv", ".sh"} {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 func mergeArtifacts(existing, next []ArtifactRecord) []ArtifactRecord {
 	seen := map[string]bool{}
 	var merged []ArtifactRecord
@@ -1013,6 +1252,116 @@ func mergeArtifacts(existing, next []ArtifactRecord) []ArtifactRecord {
 	return merged
 }
 
+func newCapsuleView(session Session) CapsuleView {
+	view := CapsuleView{
+		ID:            session.ID,
+		GitSHA:        shortSHA(session.Git.SHA),
+		GitBranch:     fallback(session.Git.Branch, "unknown"),
+		CommandCount:  len(session.Commands),
+		ArtifactCount: len(session.Artifacts),
+		StartedAt:     session.StartedAt.Format(time.RFC3339),
+		ReplayCommand: fmt.Sprintf("capsule replay %s --rerun", session.ID),
+		BundlePath:    bundleLink(session.ID),
+		AgentBriefing: agentBriefing(session, false),
+		Commands:      session.Commands,
+		Artifacts:     session.Artifacts,
+	}
+	if failed := firstFailedCommand(session); failed != nil {
+		view.FailedCommand = failed
+		view.FailedLogPath = filepath.ToSlash(filepath.Join("capsules", session.ID, failed.Logs.Combined))
+		view.FailedLogPreview = readLogPreview(filepath.Join(capsuleSnapshotDir(session.ID), failed.Logs.Combined))
+	}
+	return view
+}
+
+func bundleLink(id string) string {
+	path := filepath.Join(capsuleDir, "bundles", id+".zip")
+	if _, err := os.Stat(path); err == nil {
+		return filepath.ToSlash(filepath.Join("bundles", id+".zip"))
+	}
+	return ""
+}
+
+func readLogPreview(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	const maxChars = 1400
+	text := string(data)
+	if len(text) > maxChars {
+		text = text[:maxChars] + "\n..."
+	}
+	return strings.TrimSpace(text)
+}
+
+func importBundle(path string) (string, error) {
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+
+	var id string
+	for _, file := range reader.File {
+		parts := strings.Split(filepath.ToSlash(file.Name), "/")
+		if len(parts) >= 2 && parts[0] == "capsule" && parts[1] != "" {
+			id = parts[1]
+			break
+		}
+	}
+	if id == "" {
+		return "", errors.New("bundle does not contain capsule/<id>/ entries")
+	}
+
+	dest := capsuleSnapshotDir(id)
+	if _, err := os.Stat(dest); err == nil {
+		return "", fmt.Errorf("capsule snapshot %s already exists", id)
+	}
+	if err := ensureDirs(dest); err != nil {
+		return "", err
+	}
+	for _, file := range reader.File {
+		parts := strings.Split(filepath.ToSlash(file.Name), "/")
+		if len(parts) < 3 || parts[0] != "capsule" || parts[1] != id {
+			continue
+		}
+		rel := filepath.Clean(filepath.Join(parts[2:]...))
+		if rel == "." || rel == "" || rel == string(filepath.Separator) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+			return "", fmt.Errorf("bundle contains invalid path %q", file.Name)
+		}
+		target := filepath.Join(dest, rel)
+		if file.FileInfo().IsDir() {
+			if err := ensureDirs(target); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if err := ensureDirs(filepath.Dir(target)); err != nil {
+			return "", err
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return "", err
+		}
+		out, err := os.Create(target)
+		if err != nil {
+			rc.Close()
+			return "", err
+		}
+		_, copyErr := io.Copy(out, rc)
+		closeErr := out.Close()
+		rc.Close()
+		if copyErr != nil {
+			return "", copyErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+	}
+	return id, nil
+}
+
 var uiTemplate = template.Must(template.New("ui").Funcs(template.FuncMap{
 	"short": shortSHA,
 }).Parse(`<!doctype html>
@@ -1022,7 +1371,7 @@ var uiTemplate = template.Must(template.New("ui").Funcs(template.FuncMap{
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Capsule</title>
   <style>
-    :root { color-scheme: light; --ink:#162019; --muted:#667069; --line:#d8ded8; --panel:#f7f8f4; --accent:#126a5a; --bad:#a83232; --ok:#1f7a45; }
+    :root { color-scheme: light; --ink:#162019; --muted:#667069; --line:#d8ded8; --panel:#f7f8f4; --accent:#126a5a; --bad:#a83232; --ok:#1f7a45; --warnbg:#fff3f0; }
     * { box-sizing: border-box; }
     body { margin:0; font:14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:#fdfdf9; }
     header { padding:28px 32px 20px; border-bottom:1px solid var(--line); background:#fff; }
@@ -1039,9 +1388,17 @@ var uiTemplate = template.Must(template.New("ui").Funcs(template.FuncMap{
     th, td { text-align:left; padding:9px 8px; border-top:1px solid var(--line); vertical-align:top; }
     th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; }
     code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; }
+    pre, textarea { font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .ok { color:var(--ok); font-weight:700; }
     .bad { color:var(--bad); font-weight:700; }
     .empty { padding:48px; text-align:center; color:var(--muted); border:1px dashed var(--line); border-radius:8px; background:#fff; }
+    .failure { border:1px solid #f2cbc4; background:var(--warnbg); border-radius:8px; padding:14px; margin-bottom:16px; }
+    .preview { margin:10px 0 0; padding:12px; background:#fff; border:1px solid var(--line); border-radius:8px; overflow:auto; white-space:pre-wrap; }
+    .tools { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+    .btn { border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--ink); padding:8px 10px; cursor:pointer; }
+    textarea { width:100%; min-height:220px; border:1px solid var(--line); border-radius:8px; padding:12px; resize:vertical; background:#fbfbf8; color:var(--ink); }
+    .section-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+    a { color:var(--accent); }
   </style>
 </head>
 <body>
@@ -1058,13 +1415,31 @@ var uiTemplate = template.Must(template.New("ui").Funcs(template.FuncMap{
         <div>
           <div class="id">{{.ID}}</div>
           <div class="meta">
-            <span>{{short .Git.SHA}}</span>
-            <span>{{.Git.Branch}}</span>
-            <span>{{len .Commands}} commands</span>
-            <span>{{len .Artifacts}} artifacts</span>
+            <span>{{.GitSHA}}</span>
+            <span>{{.GitBranch}}</span>
+            <span>{{.CommandCount}} commands</span>
+            <span>{{.ArtifactCount}} artifacts</span>
+            <span>{{.StartedAt}}</span>
           </div>
         </div>
-        <code>capsule replay {{.ID}}</code>
+        <code>{{.ReplayCommand}}</code>
+      </div>
+      <div class="section">
+        {{if .FailedCommand}}
+        <div class="failure">
+          <div><strong>Failure</strong>: <code>{{.FailedCommand.Command}}</code> exited with <span class="bad">{{.FailedCommand.ExitCode}}</span>.</div>
+          <div class="tools">
+            <a class="btn" href="/files/{{.FailedLogPath}}">Open combined log</a>
+            {{if .BundlePath}}<a class="btn" href="/files/{{.BundlePath}}">Download bundle</a>{{end}}
+          </div>
+          {{if .FailedLogPreview}}<pre class="preview">{{.FailedLogPreview}}</pre>{{end}}
+        </div>
+        {{end}}
+        <div class="section-head">
+          <h2>Agent Briefing</h2>
+          <button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById('agent-{{.ID}}').value)">Copy</button>
+        </div>
+        <textarea id="agent-{{.ID}}" readonly>{{.AgentBriefing}}</textarea>
       </div>
       <div class="section">
         <h2>Execution Timeline</h2>

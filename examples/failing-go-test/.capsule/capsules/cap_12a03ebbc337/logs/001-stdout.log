@@ -1,0 +1,5 @@
+--- FAIL: TestIntentionalFailure (0.00s)
+    math_test.go:13: Multiply(3, 3) = 9, want 8
+FAIL
+FAIL	example.com/capsule/failing-go-test	0.226s
+FAIL

@@ -5,5 +5,11 @@ examples/android/.capsule/*
 examples/android/.capsule/capsules/*
 !examples/android/.capsule/capsules/cap_23dd3469056c/
 !examples/android/.capsule/capsules/cap_23dd3469056c/**
+!examples/failing-go-test/.capsule/
+examples/failing-go-test/.capsule/*
+!examples/failing-go-test/.capsule/capsules/
+examples/failing-go-test/.capsule/capsules/*
+!examples/failing-go-test/.capsule/capsules/cap_12a03ebbc337/
+!examples/failing-go-test/.capsule/capsules/cap_12a03ebbc337/**
 /capsule
 .DS_Store

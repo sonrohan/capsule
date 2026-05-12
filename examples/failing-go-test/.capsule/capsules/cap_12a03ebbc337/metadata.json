@@ -1,0 +1,31 @@
+{
+  "artifacts": null,
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "hostname": "[REDACTED]",
+    "user": "[REDACTED]",
+    "cwd": "[REDACTED]",
+    "shell": "/bin/zsh",
+    "runtime": {
+      "capsule": "capsule 0.1.3 973149d 2026-05-12T15:20:23Z",
+      "go": "go1.26.3",
+      "java": "openjdk version \"22.0.2\" 2024-07-16",
+      "javac": "javac 22.0.2",
+      "node": "v25.5.0",
+      "npm": "11.8.0",
+      "python3": "Python 3.14.2",
+      "ruby": "ruby 2.6.10p210 (2022-04-12 revision 67958) [universal.arm64e-darwin25]"
+    }
+  },
+  "finished_at": "2026-05-12T08:23:26.807639-07:00",
+  "git": {
+    "sha": "973149dab65374825fba0838d0c22b7e808194e6",
+    "branch": "main",
+    "dirty": true,
+    "status": "M ../../.gitignore\n M ../../README.md\n M ../scenarios/agent-handoff.md\n M ../../main.go\n M ../../main_test.go\n?? ../../.github/scripts/ci_with_capsule.sh\n?? ../../.github/workflows/ci.yml\n?? ./",
+    "repository": "[REDACTED]"
+  },
+  "id": "cap_12a03ebbc337",
+  "started_at": "2026-05-12T08:23:22.197225-07:00"
+}

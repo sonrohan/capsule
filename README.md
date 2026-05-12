@@ -1,36 +1,53 @@
 # Capsule
 
-Capsule records command execution in a Git repository so failures can be
-inspected, shared, and rerun with the surrounding evidence intact.
+Capsule is a flight recorder for debugging handoffs.
 
-It does not replace Git, CI, test frameworks, or containers. Git stores source
-history. Capsule stores execution history: commands, logs, exit codes, runtime
-metadata, detected artifacts, and replay instructions.
+It captures what ran, what failed, which Git state produced it, and which logs
+or artifacts matter, then packages that evidence for another developer, a CI
+artifact, or a coding agent.
 
-Capsule writes runtime data under `.capsule/` in the repository where commands
-are run.
+Git stores source history. Capsule stores execution history.
 
-## What It Is Useful For
+## The 30-Second Loop
 
-Use Capsule when the important question is not only "what changed?" but also
-"what exactly ran, what happened, and what evidence was produced?"
+When a local run fails:
 
-Common uses:
+```sh
+capsule ci go test ./...
+capsule summary --last
+capsule agent --last
+capsule bundle --last
+```
 
-- Capturing a local failing test with full stdout, stderr, exit code, Git SHA,
-  branch, dirty state, and environment metadata.
-- Uploading CI failure evidence as a structured artifact instead of relying only
-  on console logs.
-- Handing off a bug report with the exact command sequence and generated files.
-- Giving another developer or coding agent a reproducible execution record before
-  they start debugging.
-- Preserving build, test, lint, screenshot, and package artifacts that explain a
-  failure.
+What you get back is a portable repro package instead of pasted terminal output:
 
-Capsule is intentionally lightweight. Replay can rerun recorded commands, but it
-does not virtualize the filesystem, restore dependencies, or create a machine
-snapshot. If a command depends on external services, local credentials, caches,
-or uncommitted files, those dependencies still need to exist when rerunning.
+```text
+# Capsule cap_x
+Git: 973149d on main
+Commands: 1
+Artifacts: 0
+Failed: go test ./...
+Exit code: 1
+Log: .capsule/capsules/cap_x/logs/001-combined.log
+Replay: capsule replay cap_x --rerun
+```
+
+`capsule agent --last` prints a ready-to-paste debugging brief that points an
+agent at `manifest.json`, `commands.json`, `metadata.json`, and the combined
+log before it starts proposing fixes.
+
+## Where It Helps
+
+- Local failures that need a clean handoff.
+- CI jobs where logs alone are not enough.
+- PRs or issues that need a reproducible command trail.
+- Agent workflows where structured evidence is better than prose.
+- Builds, tests, lint runs, screenshots, and package outputs that should travel
+  with the failure.
+
+Capsule is intentionally lightweight. It does not snapshot the whole machine or
+recreate dependencies. Replay reruns the recorded commands against the current
+working tree unless you check out the captured Git SHA first.
 
 ## Install
 
@@ -39,23 +56,18 @@ macOS:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sonrohan/capsule/main/install.sh | sh
 capsule --version
-capsule --help
 ```
 
-If `capsule` is not found after install, add Capsule's install directory to your
-shell profile and reload the shell:
+If `capsule` is not on PATH after install:
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 exec zsh
 ```
 
-Capsule currently publishes prebuilt binaries for macOS only. Linux and Windows
-support are welcome via pull request.
+Capsule currently publishes prebuilt binaries for macOS only.
 
-### Build from Source
-
-Requires Go 1.22 or newer.
+Build from source with Go 1.22 or newer:
 
 ```sh
 go install github.com/sonrohan/capsule@latest
@@ -67,117 +79,79 @@ From this repository:
 make install
 ```
 
-## Quick Start
+## Core Workflow
 
-For a one-command capture, use `ci`. It starts a session, runs the command,
-finishes the session, prints a summary, and creates a bundle.
+One-shot capture:
 
 ```sh
 capsule ci go test ./...
 ```
 
-For a multi-command workflow:
+Multi-step capture:
 
 ```sh
 capsule start
-capsule run go test ./...
-capsule run go build ./...
+capsule run npm install
+capsule run npm test
+capsule run npm run build
 capsule finish
-capsule summary --last
-capsule bundle --last
 ```
 
-Inspect or rerun a finished Capsule:
+Inspect and replay:
 
 ```sh
 capsule list
+capsule summary --last
+capsule agent --last
 capsule replay <capsule-id>
 capsule replay <capsule-id> --rerun
 ```
 
-Open the local web UI:
+Share and receive:
+
+```sh
+capsule bundle --last
+capsule import .capsule/bundles/<capsule-id>.zip
+```
+
+Privacy-aware sharing:
+
+```sh
+capsule summary --last --redact
+capsule agent --last --redact
+capsule bundle --last --redact
+```
+
+Open the local UI:
 
 ```sh
 capsule ui
 capsule ui --port 3001
 ```
 
+The UI highlights the failed command first, shows an inline combined-log preview,
+links to the bundle, and exposes a copyable agent briefing.
+
 ## Commands
 
 ```text
 capsule start
-```
-
-Starts a new active session in `.capsule/sessions/<id>/` and records Git and
-environment metadata.
-
-```text
 capsule run <command> [args...]
-```
-
-Runs a command inside the active session. Capsule streams stdout and stderr to
-the terminal while also saving per-command logs, duration, exit code, and
-detected artifacts.
-
-```text
 capsule finish
-```
-
-Finishes the active session and writes a snapshot to `.capsule/capsules/<id>/`.
-
-```text
 capsule ci <command> [args...]
-```
-
-Runs a one-shot capture for CI or local repros. It creates a session, runs the
-command, finishes the snapshot, prints a summary, creates a bundle, and exits
-with the wrapped command's exit code if the command fails.
-
-```text
 capsule list
-```
-
-Lists finished Capsules with Git SHA, branch, command count, and artifact count.
-
-```text
-capsule replay <capsule-id>
-capsule replay <capsule-id> --rerun
-```
-
-Prints the recorded Git linkage, commands, artifacts, and log locations.
-`--rerun` executes the recorded commands again in order in the current working
-tree.
-
-```text
-capsule summary <capsule-id|--last>
-```
-
-Prints a compact repro summary suitable for a bug report, issue, pull request,
-or chat thread.
-
-```text
-capsule bundle <capsule-id|--last>
-```
-
-Creates `.capsule/bundles/<id>.zip` containing the finished snapshot.
-
-```text
+capsule summary <capsule-id|--last> [--redact]
+capsule agent <capsule-id|--last> [--redact]
+capsule bundle <capsule-id|--last> [--redact]
+capsule import <bundle.zip>
+capsule replay <capsule-id> [--rerun]
 capsule ui [--port 3000]
-```
-
-Serves a local read-only browser view of finished Capsules at
-`http://127.0.0.1:<port>`.
-
-```text
 capsule version
-capsule --version
 ```
-
-Prints the installed version and build metadata when available.
 
 ## What Capsule Stores
 
-A finished Capsule snapshot is stored at:
+A finished snapshot lives at:
 
 ```text
 .capsule/capsules/<id>/
@@ -188,14 +162,13 @@ A finished Capsule snapshot is stored at:
   artifacts/
 ```
 
-The snapshot includes:
+It includes:
 
-- Git SHA, branch, repository path, and dirty working tree status.
-- OS, architecture, hostname, user, shell, working directory, Capsule version,
-  Go version, and detected runtime tool versions.
-- Command arguments, display command, start time, finish time, duration, exit
-  code, and log paths.
-- Separate stdout, stderr, and combined logs for each command.
+- Git SHA, branch, repository path, and dirty-state metadata.
+- Runtime metadata such as OS, architecture, shell, working directory, and
+  discovered tool versions.
+- Command arguments, timing, exit code, and per-command log paths.
+- Separate stdout, stderr, and combined logs.
 - Detected artifacts copied into the snapshot.
 
 Bundles are written to:
@@ -204,14 +177,15 @@ Bundles are written to:
 .capsule/bundles/<id>.zip
 ```
 
-The zip contains the finished Capsule under `capsule/<id>/`.
+Imported bundles are restored under `.capsule/capsules/<id>/`.
 
 ## Artifact Detection
 
-Capsule scans the repository after each command and copies recognized files into
-the session snapshot. It skips `.git`, `.capsule`, `node_modules`, and `.gradle`.
+Capsule scans the repository after each command and copies recognized outputs
+into the session snapshot. It skips `.git`, `.capsule`, `node_modules`, and
+`.gradle`.
 
-Recognized artifact types include:
+Recognized types include:
 
 - Android APKs: `*.apk`
 - iOS packages: `*.ipa`
@@ -221,58 +195,62 @@ Recognized artifact types include:
 - Screenshots and snapshots: `*.png`, `*.jpg`, `*.jpeg` when the path indicates
   screenshot or snapshot output
 
-For Gradle commands, Capsule narrows artifact capture based on the task name:
-test tasks capture test results and logs, lint tasks capture lint reports and
-logs, and assemble or bundle tasks capture app packages and logs.
+For Gradle commands, Capsule narrows capture based on the task name so test
+tasks keep test evidence, lint tasks keep lint evidence, and assemble or bundle
+tasks keep package outputs.
+
+## CI Example
+
+```yaml
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go build -o capsule .
+      - run: ./capsule ci go test ./...
+      - if: always()
+        run: ./capsule bundle --last --redact || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capsule-repro
+          path: .capsule/bundles/*.zip
+```
 
 ## Sharing Policy
 
 Do not commit `.capsule/` by default.
 
-`.capsule/` is generated runtime output. It can contain large logs, generated
-binaries, screenshots, local paths, hostnames, usernames, and environment
-details. Keeping it out of normal Git history keeps source commits clean and
-reduces the chance of publishing local or sensitive execution data.
+It can contain large logs, generated binaries, screenshots, local paths,
+hostnames, usernames, and environment metadata. Commit only small curated
+fixtures that are intentionally part of documentation or tests.
 
-Share a bundle when the execution evidence is useful:
+For external sharing, prefer redacted summaries and redacted bundles.
 
-```sh
-capsule ci go test ./...
-capsule bundle --last
-```
+## Examples
 
-Then attach:
-
-```text
-.capsule/bundles/<id>.zip
-```
-
-Use bundles for CI artifacts, GitHub issues, pull requests, Slack threads, or bug
-reports. Commit only small, curated Capsule fixtures when they are intentionally
-part of examples or tests.
+- [examples/scenarios/README.md](/Users/rohan/repos/capsule/examples/scenarios/README.md)
+- [examples/android/README.md](/Users/rohan/repos/capsule/examples/android/README.md)
+- [examples/failing-go-test/README.md](/Users/rohan/repos/capsule/examples/failing-go-test/README.md)
 
 ## Development
 
-Useful commands for working on Capsule itself:
+Useful commands when working on Capsule itself:
 
 ```sh
 make build
 make test
 make install
-go test ./...
+/bin/zsh -lc 'PATH=/usr/local/go/bin:$PATH go test ./...'
 ```
-
-The Makefile injects version metadata from `VERSION`, the current Git commit,
-and the UTC build time when building or installing.
-
-## Examples
-
-See [examples/scenarios](examples/scenarios) for workflow examples:
-
-- local failing test reproduction
-- CI artifact capture
-- bug report handoff
-- agent debugging handoff
-
-See [examples/android](examples/android) for a small Android project with a
-curated Capsule snapshot.

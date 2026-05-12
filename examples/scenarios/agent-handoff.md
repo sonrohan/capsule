@@ -1,31 +1,46 @@
 # Agent Debugging Handoff
 
-Capsule is useful for AI agents because it turns a failed run into structured
-inputs.
+Capsule is useful for AI agents because it turns a failure into a structured
+debugging package.
 
-Instead of this:
+When a run fails:
 
-```text
-Tests failed, here is some terminal output...
+```sh
+capsule ci go test ./...
+capsule agent --last
+capsule bundle --last --redact
 ```
 
-Give the agent a Capsule bundle containing:
+`capsule agent --last` produces a ready-to-paste brief that tells the agent to
+start from recorded evidence instead of from prose:
+
+```text
+Debug this Capsule run.
+
+Capsule ID: cap_x
+Git SHA: ...
+Branch: ...
+Failed command: go test ./...
+Exit code: 1
+Primary log: .capsule/capsules/cap_x/logs/001-combined.log
+Artifacts:
+- ...
+```
+
+The bundle contains:
 
 ```text
 manifest.json
 commands.json
 metadata.json
-logs/001-combined.log
+logs/
 artifacts/
 ```
 
-The agent can answer concrete questions:
+That lets the receiver answer concrete questions before changing code:
 
 - What command failed?
 - What exit code did it return?
 - What Git SHA was tested?
 - Was the working tree dirty?
-- What runtime versions were present?
-- Which logs and artifacts are relevant?
-
-This makes Capsule useful even before adding any AI-specific features.
+- Which logs and artifacts matter?

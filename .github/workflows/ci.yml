@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Run build and unit tests with Capsule evidence
+        run: sh .github/scripts/ci_with_capsule.sh
+
+      - name: Upload Capsule CI bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capsule-ci-evidence-${{ github.run_id }}
+          path: .capsule/bundles/*.zip
+          if-no-files-found: error

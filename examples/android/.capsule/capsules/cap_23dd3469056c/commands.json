@@ -1,0 +1,91 @@
+[
+  {
+    "index": 1,
+    "args": [
+      "./gradlew",
+      ":app:assembleDebug"
+    ],
+    "command": "./gradlew :app:assembleDebug",
+    "started_at": "2026-05-11T23:07:04.813314-07:00",
+    "finished_at": "2026-05-11T23:07:05.482937-07:00",
+    "duration_ms": 669,
+    "exit_code": 0,
+    "logs": {
+      "stdout": "logs/001-stdout.log",
+      "stderr": "logs/001-stderr.log",
+      "combined": "logs/001-combined.log"
+    },
+    "artifacts": [
+      {
+        "path": "app/build/outputs/apk/debug/app-debug.apk",
+        "capsule_path": "artifacts/001-app__build__outputs__apk__debug__app-debug.apk",
+        "kind": "android-apk",
+        "size_bytes": 10651979,
+        "detected_at": "2026-05-11T23:07:05.5034-07:00",
+        "command_index": 1
+      }
+    ]
+  },
+  {
+    "index": 2,
+    "args": [
+      "./gradlew",
+      ":app:testDebugUnitTest"
+    ],
+    "command": "./gradlew :app:testDebugUnitTest",
+    "started_at": "2026-05-11T23:07:10.210809-07:00",
+    "finished_at": "2026-05-11T23:07:10.818831-07:00",
+    "duration_ms": 608,
+    "exit_code": 0,
+    "logs": {
+      "stdout": "logs/002-stdout.log",
+      "stderr": "logs/002-stderr.log",
+      "combined": "logs/002-combined.log"
+    },
+    "artifacts": [
+      {
+        "path": "app/build/test-results/testDebugUnitTest/TEST-app.capsule.ExampleUnitTest.xml",
+        "capsule_path": "artifacts/002-app__build__test-results__testDebugUnitTest__TEST-app.capsule.ExampleUnitTest.xml",
+        "kind": "junit-xml",
+        "size_bytes": 420,
+        "detected_at": "2026-05-11T23:07:10.831039-07:00",
+        "command_index": 2
+      }
+    ]
+  },
+  {
+    "index": 3,
+    "args": [
+      "./gradlew",
+      ":app:lintDebug"
+    ],
+    "command": "./gradlew :app:lintDebug",
+    "started_at": "2026-05-11T23:07:14.830786-07:00",
+    "finished_at": "2026-05-11T23:07:15.521554-07:00",
+    "duration_ms": 690,
+    "exit_code": 0,
+    "logs": {
+      "stdout": "logs/003-stdout.log",
+      "stderr": "logs/003-stderr.log",
+      "combined": "logs/003-combined.log"
+    },
+    "artifacts": [
+      {
+        "path": "app/build/reports/lint-results-debug.html",
+        "capsule_path": "artifacts/003-app__build__reports__lint-results-debug.html",
+        "kind": "android-lint-report",
+        "size_bytes": 130887,
+        "detected_at": "2026-05-11T23:07:15.534265-07:00",
+        "command_index": 3
+      },
+      {
+        "path": "app/build/reports/lint-results-debug.xml",
+        "capsule_path": "artifacts/003-app__build__reports__lint-results-debug.xml",
+        "kind": "android-lint-report",
+        "size_bytes": 14769,
+        "detected_at": "2026-05-11T23:07:15.534621-07:00",
+        "command_index": 3
+      }
+    ]
+  }
+]

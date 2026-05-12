@@ -1,3 +1,9 @@
 .capsule/
+!examples/android/.capsule/
+examples/android/.capsule/*
+!examples/android/.capsule/capsules/
+examples/android/.capsule/capsules/*
+!examples/android/.capsule/capsules/cap_23dd3469056c/
+!examples/android/.capsule/capsules/cap_23dd3469056c/**
 /capsule
 .DS_Store

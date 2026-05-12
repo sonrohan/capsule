@@ -1,0 +1,62 @@
+{
+  "artifacts": [
+    {
+      "path": "app/build/outputs/apk/debug/app-debug.apk",
+      "capsule_path": "artifacts/001-app__build__outputs__apk__debug__app-debug.apk",
+      "kind": "android-apk",
+      "size_bytes": 10651979,
+      "detected_at": "2026-05-11T23:07:05.5034-07:00",
+      "command_index": 1
+    },
+    {
+      "path": "app/build/test-results/testDebugUnitTest/TEST-app.capsule.ExampleUnitTest.xml",
+      "capsule_path": "artifacts/002-app__build__test-results__testDebugUnitTest__TEST-app.capsule.ExampleUnitTest.xml",
+      "kind": "junit-xml",
+      "size_bytes": 420,
+      "detected_at": "2026-05-11T23:07:10.831039-07:00",
+      "command_index": 2
+    },
+    {
+      "path": "app/build/reports/lint-results-debug.html",
+      "capsule_path": "artifacts/003-app__build__reports__lint-results-debug.html",
+      "kind": "android-lint-report",
+      "size_bytes": 130887,
+      "detected_at": "2026-05-11T23:07:15.534265-07:00",
+      "command_index": 3
+    },
+    {
+      "path": "app/build/reports/lint-results-debug.xml",
+      "capsule_path": "artifacts/003-app__build__reports__lint-results-debug.xml",
+      "kind": "android-lint-report",
+      "size_bytes": 14769,
+      "detected_at": "2026-05-11T23:07:15.534621-07:00",
+      "command_index": 3
+    }
+  ],
+  "environment": {
+    "os": "darwin",
+    "arch": "arm64",
+    "hostname": "Rohans-MacBook-Pro.local",
+    "user": "rohan",
+    "cwd": "/Users/rohan/repos/capsule/examples/android",
+    "shell": "/bin/zsh",
+    "runtime": {
+      "go": "go1.26.3",
+      "java": "openjdk version \"22.0.2\" 2024-07-16",
+      "javac": "javac 22.0.2",
+      "node": "v25.5.0",
+      "npm": "11.8.0",
+      "python3": "Python 3.14.2",
+      "ruby": "ruby 2.6.10p210 (2022-04-12 revision 67958) [universal.arm64e-darwin25]"
+    }
+  },
+  "finished_at": "2026-05-11T23:07:18.944783-07:00",
+  "git": {
+    "sha": "39cb3caf9e993540234ff2b8f7a476afb536f172",
+    "branch": "main",
+    "dirty": false,
+    "repository": "/Users/rohan/repos/capsule"
+  },
+  "id": "cap_23dd3469056c",
+  "started_at": "2026-05-11T23:07:01.463175-07:00"
+}

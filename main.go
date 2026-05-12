@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"crypto/rand"
 	"encoding/hex"
@@ -22,6 +23,8 @@ import (
 )
 
 const capsuleDir = ".capsule"
+
+var showRunFailureGuidance = true
 
 type Session struct {
 	ID          string            `json:"id"`
@@ -95,6 +98,12 @@ func main() {
 		err = cmdFinish()
 	case "replay":
 		err = cmdReplay(os.Args[2:])
+	case "ci":
+		err = cmdCI(os.Args[2:])
+	case "summary":
+		err = cmdSummary(os.Args[2:])
+	case "bundle":
+		err = cmdBundle(os.Args[2:])
 	case "list":
 		err = cmdList()
 	case "ui":
@@ -106,9 +115,29 @@ func main() {
 	}
 
 	if err != nil {
+		var commandErr *commandFailedError
+		if errors.As(err, &commandErr) {
+			if !commandErr.quiet {
+				fmt.Fprintln(os.Stderr, "capsule:", commandErr.Error())
+			}
+			code := commandErr.code
+			if code < 1 {
+				code = 1
+			}
+			os.Exit(code)
+		}
 		fmt.Fprintln(os.Stderr, "capsule:", err)
 		os.Exit(1)
 	}
+}
+
+type commandFailedError struct {
+	code  int
+	quiet bool
+}
+
+func (e *commandFailedError) Error() string {
+	return fmt.Sprintf("command exited with code %d", e.code)
 }
 
 func usage() {
@@ -119,6 +148,9 @@ Usage:
   capsule run <command> [args...]
   capsule finish
   capsule replay <capsule-id> [--rerun]
+  capsule ci <command> [args...]
+  capsule summary <capsule-id|--last>
+  capsule bundle <capsule-id|--last>
   capsule list
   capsule ui [--port 3000]`)
 }
@@ -262,7 +294,20 @@ func cmdRun(args []string) error {
 	}
 	fmt.Printf("Recorded command #%d: exit=%d duration=%dms artifacts=%d\n", index, exitCode, record.DurationMS, len(artifacts))
 	if runErr != nil {
-		return fmt.Errorf("command exited with code %d", exitCode)
+		if showRunFailureGuidance {
+			fmt.Println()
+			fmt.Println("Command failed.")
+			fmt.Println()
+			fmt.Println("Inspect:")
+			fmt.Printf("  less %s\n", filepath.Join(sessionDir(session.ID), record.Logs.Combined))
+			fmt.Println()
+			fmt.Println("Finish snapshot:")
+			fmt.Println("  capsule finish")
+			fmt.Println()
+			fmt.Println("Replay later:")
+			fmt.Printf("  capsule replay %s --rerun\n", session.ID)
+		}
+		return &commandFailedError{code: exitCode}
 	}
 	return nil
 }
@@ -300,6 +345,73 @@ func cmdFinish() error {
 	fmt.Printf("Snapshot: %s\n", dest)
 	fmt.Printf("Commands: %d\n", len(session.Commands))
 	fmt.Printf("Artifacts: %d\n", len(session.Artifacts))
+	return nil
+}
+
+func cmdCI(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing command")
+	}
+	if _, err := os.Stat(activeSessionPath()); err == nil {
+		return errors.New("an active session already exists; finish or remove it before running capsule ci")
+	}
+
+	if err := cmdStart(); err != nil {
+		return err
+	}
+	session, err := loadActiveSession()
+	if err != nil {
+		return err
+	}
+
+	previousGuidance := showRunFailureGuidance
+	showRunFailureGuidance = false
+	runErr := cmdRun(args)
+	showRunFailureGuidance = previousGuidance
+	finishErr := cmdFinish()
+	if finishErr != nil {
+		return finishErr
+	}
+
+	fmt.Println()
+	fmt.Println("Capsule CI snapshot ready.")
+	if err := printSummary(session.ID); err != nil {
+		return err
+	}
+	bundlePath, err := createBundle(session.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Bundle: %s\n", bundlePath)
+
+	if runErr != nil {
+		var commandErr *commandFailedError
+		if errors.As(runErr, &commandErr) {
+			return &commandFailedError{code: commandErr.code, quiet: true}
+		}
+		return runErr
+	}
+	return nil
+}
+
+func cmdSummary(args []string) error {
+	id, err := capsuleIDFromArgs(args)
+	if err != nil {
+		return err
+	}
+	return printSummary(id)
+}
+
+func cmdBundle(args []string) error {
+	id, err := capsuleIDFromArgs(args)
+	if err != nil {
+		return err
+	}
+	path, err := createBundle(id)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Bundle created: %s\n", path)
 	return nil
 }
 
@@ -359,6 +471,31 @@ func cmdReplay(args []string) error {
 	return nil
 }
 
+func printSummary(id string) error {
+	session, err := loadCapsule(id)
+	if err != nil {
+		return err
+	}
+	failed := firstFailedCommand(session)
+	fmt.Printf("# Capsule %s\n", session.ID)
+	fmt.Printf("Git: %s on %s\n", fallback(session.Git.SHA, "unknown"), fallback(session.Git.Branch, "unknown"))
+	fmt.Printf("Started: %s\n", session.StartedAt.Format(time.RFC3339))
+	if session.FinishedAt != nil {
+		fmt.Printf("Finished: %s\n", session.FinishedAt.Format(time.RFC3339))
+	}
+	fmt.Printf("Commands: %d\n", len(session.Commands))
+	fmt.Printf("Artifacts: %d\n", len(session.Artifacts))
+	if failed != nil {
+		fmt.Printf("Failed: %s\n", failed.Command)
+		fmt.Printf("Exit code: %d\n", failed.ExitCode)
+		fmt.Printf("Log: %s\n", filepath.Join(capsuleSnapshotDir(session.ID), failed.Logs.Combined))
+	} else {
+		fmt.Println("Failed: none")
+	}
+	fmt.Printf("Replay: capsule replay %s --rerun\n", session.ID)
+	return nil
+}
+
 func cmdList() error {
 	root := filepath.Join(capsuleDir, "capsules")
 	entries, err := os.ReadDir(root)
@@ -393,6 +530,64 @@ func cmdList() error {
 		fmt.Println("No Capsules found.")
 	}
 	return nil
+}
+
+func createBundle(id string) (string, error) {
+	src := capsuleSnapshotDir(id)
+	if _, err := os.Stat(src); err != nil {
+		return "", err
+	}
+	destDir := filepath.Join(capsuleDir, "bundles")
+	if err := ensureDirs(destDir); err != nil {
+		return "", err
+	}
+	dest := filepath.Join(destDir, id+".zip")
+	out, err := os.Create(dest)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	zw := zip.NewWriter(out)
+	defer zw.Close()
+	prefix := filepath.Join("capsule", id)
+	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(filepath.Join(prefix, rel))
+		header.Method = zip.Deflate
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		_, err = io.Copy(writer, in)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return dest, nil
 }
 
 func cmdUI(args []string) error {
@@ -601,6 +796,33 @@ func allCapsules() ([]Session, error) {
 	}
 	sort.Slice(capsules, func(i, j int) bool { return capsules[i].StartedAt.After(capsules[j].StartedAt) })
 	return capsules, nil
+}
+
+func capsuleIDFromArgs(args []string) (string, error) {
+	if len(args) == 0 || args[0] == "--last" {
+		return lastCapsuleID()
+	}
+	return args[0], nil
+}
+
+func lastCapsuleID() (string, error) {
+	capsules, err := allCapsules()
+	if err != nil {
+		return "", err
+	}
+	if len(capsules) == 0 {
+		return "", errors.New("no finished Capsules found")
+	}
+	return capsules[0].ID, nil
+}
+
+func firstFailedCommand(session Session) *CommandRecord {
+	for i := range session.Commands {
+		if session.Commands[i].ExitCode != 0 {
+			return &session.Commands[i]
+		}
+	}
+	return nil
 }
 
 func writeSnapshotFiles(dest string, session Session) error {

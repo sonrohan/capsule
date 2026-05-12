@@ -31,6 +31,21 @@ func TestShortSHA(t *testing.T) {
 	}
 }
 
+func TestArtifactMatchesGradleCommand(t *testing.T) {
+	if !artifactMatchesCommand("android-apk", []string{"./gradlew", ":app:assembleDebug"}) {
+		t.Fatal("assemble should match APK artifacts")
+	}
+	if artifactMatchesCommand("junit-xml", []string{"./gradlew", ":app:assembleDebug"}) {
+		t.Fatal("assemble should not match JUnit artifacts")
+	}
+	if !artifactMatchesCommand("junit-xml", []string{"./gradlew", ":app:testDebugUnitTest"}) {
+		t.Fatal("test should match JUnit artifacts")
+	}
+	if !artifactMatchesCommand("android-lint-report", []string{"./gradlew", ":app:lintDebug"}) {
+		t.Fatal("lint should match Android lint reports")
+	}
+}
+
 func TestFirstFailedCommand(t *testing.T) {
 	session := Session{
 		Commands: []CommandRecord{

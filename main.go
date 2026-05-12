@@ -266,7 +266,7 @@ func cmdRun(args []string) error {
 		}
 	}
 
-	artifacts, detectErr := detectArtifacts(session.ID, index, start)
+	artifacts, detectErr := detectArtifacts(session.ID, index, start, args)
 	if detectErr != nil {
 		fmt.Fprintln(os.Stderr, "capsule: artifact detection failed:", detectErr)
 	}
@@ -679,7 +679,7 @@ func toolVersion(name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func detectArtifacts(sessionID string, commandIndex int, since time.Time) ([]ArtifactRecord, error) {
+func detectArtifacts(sessionID string, commandIndex int, since time.Time, args []string) ([]ArtifactRecord, error) {
 	var artifacts []ArtifactRecord
 	destRoot := filepath.Join(sessionDir(sessionID), "artifacts")
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
@@ -699,6 +699,9 @@ func detectArtifacts(sessionID string, commandIndex int, since time.Time) ([]Art
 		}
 		kind := artifactKind(clean)
 		if kind == "" {
+			return nil
+		}
+		if !artifactMatchesCommand(kind, args) {
 			return nil
 		}
 		info, err := d.Info()
@@ -722,6 +725,23 @@ func detectArtifacts(sessionID string, commandIndex int, since time.Time) ([]Art
 	})
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
 	return artifacts, err
+}
+
+func artifactMatchesCommand(kind string, args []string) bool {
+	command := strings.ToLower(strings.Join(args, " "))
+	if !strings.Contains(command, "gradle") {
+		return true
+	}
+	switch {
+	case strings.Contains(command, "lint"):
+		return kind == "android-lint-report" || kind == "log"
+	case strings.Contains(command, "test"):
+		return kind == "junit-xml" || kind == "log"
+	case strings.Contains(command, "assemble") || strings.Contains(command, "bundle"):
+		return kind == "android-apk" || kind == "ios-ipa" || kind == "log"
+	default:
+		return true
+	}
 }
 
 func artifactKind(path string) string {

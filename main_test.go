@@ -81,6 +81,48 @@ func TestArtifactMatchesGradleCommand(t *testing.T) {
 	}
 }
 
+func TestDetectArtifactsWithConfigCustomKindAndExclude(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	if err := ensureDirs("coverage", "ignored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("coverage/unit.out", []byte("mode: set\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("ignored/unit.out", []byte("mode: set\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := defaultConfig()
+	config.Artifacts.Kinds["go-coverage"] = []string{"**/*.out"}
+	config.Artifacts.Exclude = append(config.Artifacts.Exclude, "ignored/**")
+
+	artifacts, err := detectArtifactsWithConfig(config, "cap_custom", 1, time.Now(), []string{"go", "test", "./..."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("detected %d artifacts, want 1: %#v", len(artifacts), artifacts)
+	}
+	if got, want := artifacts[0].Kind, "go-coverage"; got != want {
+		t.Fatalf("artifact kind = %q, want %q", got, want)
+	}
+	if got, want := artifacts[0].Path, "coverage/unit.out"; got != want {
+		t.Fatalf("artifact path = %q, want %q", got, want)
+	}
+}
+
 func TestFirstFailedCommand(t *testing.T) {
 	session := Session{
 		Commands: []CommandRecord{
@@ -208,6 +250,67 @@ func TestCreateBundleRedactsSensitiveContent(t *testing.T) {
 	}
 	if !strings.Contains(contents["capsule/"+session.ID+"/logs/001-combined.log"], "[REDACTED") {
 		t.Fatal("expected redacted marker in combined log")
+	}
+}
+
+func TestCreateBundleWithConfigExcludesArtifacts(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	session := Session{
+		ID:        "cap_bundle_policy",
+		StartedAt: time.Now(),
+		Commands: []CommandRecord{
+			{Index: 1, Command: "go test ./...", ExitCode: 1, Logs: CommandLogs{Combined: "logs/001-combined.log"}},
+		},
+		Artifacts: []ArtifactRecord{
+			{Path: "reports/failure.txt", CapsulePath: "artifacts/001-failure.txt", Kind: "log"},
+		},
+	}
+	snapshot := capsuleSnapshotDir(session.ID)
+	if err := ensureDirs(filepath.Join(snapshot, "logs"), filepath.Join(snapshot, "artifacts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSnapshotFiles(snapshot, session); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "logs", "001-combined.log"), []byte("failed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "artifacts", "001-failure.txt"), []byte("details\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := defaultConfig()
+	config.Bundle.Exclude = append(config.Bundle.Exclude, "artifacts/**")
+	bundlePath, err := createBundleWithConfig(session.ID, false, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := unzipContents(t, bundlePath)
+	if _, ok := contents["capsule/"+session.ID+"/artifacts/001-failure.txt"]; ok {
+		t.Fatal("artifact was included despite bundle exclude")
+	}
+	if _, ok := contents["capsule/"+session.ID+"/logs/001-combined.log"]; !ok {
+		t.Fatal("combined log should still be included")
+	}
+}
+
+func TestInvalidRedactionPatternFails(t *testing.T) {
+	config := defaultConfig()
+	config.Redaction.Replace = append(config.Redaction.Replace, RedactionReplacement{Pattern: "["})
+	_, err := newRedactorWithConfig(Session{}, config)
+	if err == nil {
+		t.Fatal("expected invalid redaction pattern to fail")
 	}
 }
 

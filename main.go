@@ -108,12 +108,68 @@ type CapsuleView struct {
 
 type Redactor struct {
 	replacements []stringPair
-	tokenPattern *regexp.Regexp
+	patterns     []redactionPattern
 }
 
 type stringPair struct {
 	old string
 	new string
+}
+
+type redactionPattern struct {
+	pattern     *regexp.Regexp
+	replacement string
+}
+
+type CapsuleConfig struct {
+	Capture   CaptureConfig   `json:"capture"`
+	Artifacts ArtifactConfig  `json:"artifacts"`
+	Redaction RedactionConfig `json:"redaction"`
+	Bundle    BundleConfig    `json:"bundle"`
+}
+
+type CaptureConfig struct {
+	ScanRoots        []string `json:"scan_roots"`
+	Include          []string `json:"include"`
+	Exclude          []string `json:"exclude"`
+	MaxArtifactBytes int64    `json:"max_artifact_bytes"`
+}
+
+type ArtifactConfig struct {
+	Enabled        *bool               `json:"enabled"`
+	Kinds          map[string][]string `json:"kinds"`
+	Include        []string            `json:"include"`
+	Exclude        []string            `json:"exclude"`
+	CommandFilters map[string][]string `json:"command_filters"`
+}
+
+type RedactionConfig struct {
+	Defaults *bool                  `json:"defaults"`
+	Replace  []RedactionReplacement `json:"replace"`
+	Literals []string               `json:"literals"`
+	Allow    []string               `json:"allow"`
+	Files    RedactionFilesConfig   `json:"files"`
+}
+
+type RedactionReplacement struct {
+	Pattern string `json:"pattern"`
+	With    string `json:"with"`
+}
+
+type RedactionFilesConfig struct {
+	Include []string `json:"include"`
+	Exclude []string `json:"exclude"`
+}
+
+type BundleConfig struct {
+	Include []string `json:"include"`
+	Exclude []string `json:"exclude"`
+}
+
+type BundleOptions struct {
+	Redact  bool
+	Include []string
+	Exclude []string
 }
 
 func main() {
@@ -191,7 +247,7 @@ Usage:
   capsule ci <command> [args...]
   capsule summary <capsule-id|--last> [--redact]
   capsule agent <capsule-id|--last> [--redact]
-  capsule bundle <capsule-id|--last> [--redact]
+  capsule bundle <capsule-id|--last> [--redact] [--include glob] [--exclude glob] [--no-artifacts]
   capsule import <bundle.zip>
   capsule list
   capsule ui [--port 3000]
@@ -211,6 +267,190 @@ func versionString() string {
 		parts = append(parts, date)
 	}
 	return strings.Join(parts, " ")
+}
+
+func defaultConfig() CapsuleConfig {
+	enabled := true
+	return CapsuleConfig{
+		Capture: CaptureConfig{
+			ScanRoots: []string{"."},
+			Exclude:   []string{".git/**", ".capsule/**", "node_modules/**", ".gradle/**", "**/.git/**", "**/.capsule/**", "**/node_modules/**", "**/.gradle/**"},
+		},
+		Artifacts: ArtifactConfig{
+			Enabled: &enabled,
+			Kinds: map[string][]string{
+				"android-apk":         {"**/*.apk"},
+				"ios-ipa":             {"**/*.ipa"},
+				"xcode-result":        {"**/*.xcresult"},
+				"log":                 {"**/*.log"},
+				"android-lint-report": {"**/lint-results*.html", "**/lint-results*.xml"},
+				"junit-xml":           {"**/test-*.xml", "**/*junit*.xml", "**/surefire-reports/*.xml", "**/test-results/**/*.xml"},
+				"screenshot":          {"**/*screenshot*.png", "**/*screenshot*.jpg", "**/*screenshot*.jpeg", "**/*snapshot*.png", "**/*snapshot*.jpg", "**/*snapshot*.jpeg", "**/*screenshot*/**/*.png", "**/*screenshot*/**/*.jpg", "**/*screenshot*/**/*.jpeg", "**/*snapshot*/**/*.png", "**/*snapshot*/**/*.jpg", "**/*snapshot*/**/*.jpeg"},
+			},
+			CommandFilters: map[string][]string{
+				"gradle:lint":     {"android-lint-report", "log"},
+				"gradle:test":     {"junit-xml", "log"},
+				"gradle:assemble": {"android-apk", "ios-ipa", "log"},
+				"gradle:bundle":   {"android-apk", "ios-ipa", "log"},
+			},
+		},
+		Redaction: RedactionConfig{
+			Defaults: &enabled,
+			Files: RedactionFilesConfig{
+				Include: []string{"logs/**", "manifest.json", "commands.json", "metadata.json", "session.json", "artifacts/**/*.json", "artifacts/**/*.log", "artifacts/**/*.txt", "artifacts/**/*.xml", "artifacts/**/*.html", "artifacts/**/*.md", "artifacts/**/*.yaml", "artifacts/**/*.yml", "artifacts/**/*.csv", "artifacts/**/*.sh"},
+			},
+		},
+		Bundle: BundleConfig{
+			Include: []string{"**"},
+		},
+	}
+}
+
+func loadConfig() (CapsuleConfig, error) {
+	config := defaultConfig()
+	if _, err := os.Stat("capsule.json"); os.IsNotExist(err) {
+		return config, nil
+	} else if err != nil {
+		return config, err
+	}
+
+	var user CapsuleConfig
+	if err := loadJSON("capsule.json", &user); err != nil {
+		return config, err
+	}
+	mergeConfig(&config, user)
+	return config, nil
+}
+
+func mergeConfig(base *CapsuleConfig, user CapsuleConfig) {
+	if user.Capture.ScanRoots != nil {
+		base.Capture.ScanRoots = user.Capture.ScanRoots
+	}
+	if user.Capture.Include != nil {
+		base.Capture.Include = user.Capture.Include
+	}
+	if user.Capture.Exclude != nil {
+		base.Capture.Exclude = append(base.Capture.Exclude, user.Capture.Exclude...)
+	}
+	if user.Capture.MaxArtifactBytes != 0 {
+		base.Capture.MaxArtifactBytes = user.Capture.MaxArtifactBytes
+	}
+	if user.Artifacts.Kinds != nil {
+		for kind, patterns := range user.Artifacts.Kinds {
+			base.Artifacts.Kinds[kind] = patterns
+		}
+	}
+	if user.Artifacts.Include != nil {
+		base.Artifacts.Include = user.Artifacts.Include
+	}
+	if user.Artifacts.Exclude != nil {
+		base.Artifacts.Exclude = append(base.Artifacts.Exclude, user.Artifacts.Exclude...)
+	}
+	if user.Artifacts.CommandFilters != nil {
+		for filter, kinds := range user.Artifacts.CommandFilters {
+			base.Artifacts.CommandFilters[filter] = kinds
+		}
+	}
+	if user.Artifacts.Enabled != nil {
+		base.Artifacts.Enabled = user.Artifacts.Enabled
+	}
+	if user.Redaction.Replace != nil {
+		base.Redaction.Replace = append(base.Redaction.Replace, user.Redaction.Replace...)
+	}
+	if user.Redaction.Literals != nil {
+		base.Redaction.Literals = append(base.Redaction.Literals, user.Redaction.Literals...)
+	}
+	if user.Redaction.Allow != nil {
+		base.Redaction.Allow = append(base.Redaction.Allow, user.Redaction.Allow...)
+	}
+	if user.Redaction.Files.Include != nil {
+		base.Redaction.Files.Include = user.Redaction.Files.Include
+	}
+	if user.Redaction.Files.Exclude != nil {
+		base.Redaction.Files.Exclude = append(base.Redaction.Files.Exclude, user.Redaction.Files.Exclude...)
+	}
+	if user.Redaction.Defaults != nil {
+		base.Redaction.Defaults = user.Redaction.Defaults
+	}
+	if user.Bundle.Include != nil {
+		base.Bundle.Include = user.Bundle.Include
+	}
+	if user.Bundle.Exclude != nil {
+		base.Bundle.Exclude = append(base.Bundle.Exclude, user.Bundle.Exclude...)
+	}
+}
+
+func artifactsEnabled(config CapsuleConfig) bool {
+	return config.Artifacts.Enabled == nil || *config.Artifacts.Enabled
+}
+
+func redactionDefaultsEnabled(config CapsuleConfig) bool {
+	return config.Redaction.Defaults == nil || *config.Redaction.Defaults
+}
+
+func pathIncluded(path string, include, exclude []string) bool {
+	path = filepath.ToSlash(filepath.Clean(path))
+	if len(include) > 0 && !matchesAnyGlob(path, include) {
+		return false
+	}
+	return !matchesAnyGlob(path, exclude)
+}
+
+func matchesAnyGlob(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matchGlob(pattern, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchGlob(pattern, path string) bool {
+	pattern = filepath.ToSlash(filepath.Clean(strings.TrimSpace(pattern)))
+	path = filepath.ToSlash(filepath.Clean(path))
+	if pattern == "." {
+		return path == "."
+	}
+	if pattern == "**" {
+		return true
+	}
+	if !strings.Contains(pattern, "/") {
+		if ok, _ := filepath.Match(pattern, filepath.Base(path)); ok {
+			return true
+		}
+	}
+	regex, err := globRegex(pattern)
+	if err != nil {
+		return false
+	}
+	return regex.MatchString(path)
+}
+
+func globRegex(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				i++
+				if i+1 < len(pattern) && pattern[i+1] == '/' {
+					b.WriteString("(?:.*/)?")
+					i++
+				} else {
+					b.WriteString(".*")
+				}
+			} else {
+				b.WriteString("[^/]*")
+			}
+		case '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
 }
 
 func cmdStart() error {
@@ -477,12 +717,20 @@ func cmdAgent(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(agentBriefing(session, redact))
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	text, err := agentBriefingWithConfig(session, redact, config)
+	if err != nil {
+		return err
+	}
+	fmt.Print(text)
 	return nil
 }
 
 func cmdBundle(args []string) error {
-	args, redact, err := parseRedactFlag(args)
+	args, options, err := parseBundleOptions(args)
 	if err != nil {
 		return err
 	}
@@ -490,7 +738,7 @@ func cmdBundle(args []string) error {
 	if err != nil {
 		return err
 	}
-	path, err := createBundle(id, redact)
+	path, err := createBundleWithOptions(id, options)
 	if err != nil {
 		return err
 	}
@@ -572,7 +820,15 @@ func printSummary(id string, redact bool) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(summaryText(session, redact))
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	text, err := summaryTextWithConfig(session, redact, config)
+	if err != nil {
+		return err
+	}
+	fmt.Print(text)
 	return nil
 }
 
@@ -613,6 +869,24 @@ func cmdList() error {
 }
 
 func createBundle(id string, redact bool) (string, error) {
+	return createBundleWithOptions(id, BundleOptions{Redact: redact})
+}
+
+func createBundleWithOptions(id string, options BundleOptions) (string, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return "", err
+	}
+	if len(options.Include) > 0 {
+		config.Bundle.Include = options.Include
+	}
+	if len(options.Exclude) > 0 {
+		config.Bundle.Exclude = append(config.Bundle.Exclude, options.Exclude...)
+	}
+	return createBundleWithConfig(id, options.Redact, config)
+}
+
+func createBundleWithConfig(id string, redact bool, config CapsuleConfig) (string, error) {
 	src := capsuleSnapshotDir(id)
 	if _, err := os.Stat(src); err != nil {
 		return "", err
@@ -639,7 +913,13 @@ func createBundle(id string, redact bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	redactor := newRedactor(session)
+	var redactor Redactor
+	if redact {
+		redactor, err = newRedactorWithConfig(session, config)
+		if err != nil {
+			return "", err
+		}
+	}
 	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -650,6 +930,10 @@ func createBundle(id string, redact bool) (string, error) {
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !pathIncluded(rel, config.Bundle.Include, config.Bundle.Exclude) {
+			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -669,7 +953,7 @@ func createBundle(id string, redact bool) (string, error) {
 		if err != nil {
 			return err
 		}
-		if redact && shouldRedactFile(rel) {
+		if redact && shouldRedactFileWithConfig(rel, config) {
 			data = []byte(redactor.RedactText(string(data)))
 		}
 		_, err = writer.Write(data)
@@ -776,94 +1060,134 @@ func toolVersion(name string) string {
 }
 
 func detectArtifacts(sessionID string, commandIndex int, since time.Time, args []string) ([]ArtifactRecord, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return detectArtifactsWithConfig(config, sessionID, commandIndex, since, args)
+}
+
+func detectArtifactsWithConfig(config CapsuleConfig, sessionID string, commandIndex int, since time.Time, args []string) ([]ArtifactRecord, error) {
 	var artifacts []ArtifactRecord
+	if !artifactsEnabled(config) {
+		return artifacts, nil
+	}
+	roots := config.Capture.ScanRoots
+	if len(roots) == 0 {
+		roots = []string{"."}
+	}
 	destRoot := filepath.Join(sessionDir(sessionID), "artifacts")
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		clean := filepath.Clean(path)
-		if clean == "." {
-			return nil
-		}
-		if d.IsDir() {
-			base := filepath.Base(clean)
-			if base == ".git" || base == ".capsule" || base == "node_modules" || base == ".gradle" {
-				return filepath.SkipDir
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
 			}
+			clean := filepath.Clean(path)
+			if clean == "." {
+				return nil
+			}
+			if d.IsDir() {
+				if clean != "." && matchesAnyGlob(filepath.ToSlash(clean)+"/placeholder", config.Capture.Exclude) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !pathIncluded(clean, config.Capture.Include, config.Capture.Exclude) {
+				return nil
+			}
+			if !pathIncluded(clean, config.Artifacts.Include, config.Artifacts.Exclude) {
+				return nil
+			}
+			kind := artifactKindWithConfig(clean, config)
+			if kind == "" {
+				return nil
+			}
+			if !artifactMatchesCommandWithConfig(kind, args, config) {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			if config.Capture.MaxArtifactBytes > 0 && info.Size() > config.Capture.MaxArtifactBytes {
+				return nil
+			}
+			artifactName := fmt.Sprintf("%03d-%s", commandIndex, strings.ReplaceAll(filepath.ToSlash(clean), "/", "__"))
+			capsulePath := filepath.Join(destRoot, artifactName)
+			if err := copyFile(clean, capsulePath); err != nil {
+				return nil
+			}
+			artifacts = append(artifacts, ArtifactRecord{
+				Path:         filepath.ToSlash(clean),
+				CapsulePath:  filepath.ToSlash(filepath.Join("artifacts", artifactName)),
+				Kind:         kind,
+				SizeBytes:    info.Size(),
+				DetectedAt:   time.Now(),
+				CommandIndex: commandIndex,
+			})
 			return nil
-		}
-		kind := artifactKind(clean)
-		if kind == "" {
-			return nil
-		}
-		if !artifactMatchesCommand(kind, args) {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		artifactName := fmt.Sprintf("%03d-%s", commandIndex, strings.ReplaceAll(filepath.ToSlash(clean), "/", "__"))
-		capsulePath := filepath.Join(destRoot, artifactName)
-		if err := copyFile(clean, capsulePath); err != nil {
-			return nil
-		}
-		artifacts = append(artifacts, ArtifactRecord{
-			Path:         filepath.ToSlash(clean),
-			CapsulePath:  filepath.ToSlash(filepath.Join("artifacts", artifactName)),
-			Kind:         kind,
-			SizeBytes:    info.Size(),
-			DetectedAt:   time.Now(),
-			CommandIndex: commandIndex,
 		})
-		return nil
-	})
+		if err != nil {
+			return nil, err
+		}
+	}
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Path < artifacts[j].Path })
-	return artifacts, err
+	return artifacts, nil
 }
 
 func artifactMatchesCommand(kind string, args []string) bool {
+	return artifactMatchesCommandWithConfig(kind, args, defaultConfig())
+}
+
+func artifactMatchesCommandWithConfig(kind string, args []string, config CapsuleConfig) bool {
 	command := strings.ToLower(strings.Join(args, " "))
-	if !strings.Contains(command, "gradle") {
-		return true
+	filters := make([]string, 0, len(config.Artifacts.CommandFilters))
+	for filter := range config.Artifacts.CommandFilters {
+		filters = append(filters, filter)
 	}
-	switch {
-	case strings.Contains(command, "lint"):
-		return kind == "android-lint-report" || kind == "log"
-	case strings.Contains(command, "test"):
-		return kind == "junit-xml" || kind == "log"
-	case strings.Contains(command, "assemble") || strings.Contains(command, "bundle"):
-		return kind == "android-apk" || kind == "ios-ipa" || kind == "log"
-	default:
-		return true
+	sort.Slice(filters, func(i, j int) bool {
+		iParts := strings.Count(filters[i], ":")
+		jParts := strings.Count(filters[j], ":")
+		if iParts != jParts {
+			return iParts > jParts
+		}
+		return len(filters[i]) > len(filters[j])
+	})
+	for _, filter := range filters {
+		kinds := config.Artifacts.CommandFilters[filter]
+		parts := strings.Split(filter, ":")
+		matches := true
+		for _, part := range parts {
+			if part != "" && !strings.Contains(command, strings.ToLower(part)) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			for _, allowed := range kinds {
+				if kind == allowed {
+					return true
+				}
+			}
+			return false
+		}
 	}
+	return true
 }
 
 func artifactKind(path string) string {
-	lower := strings.ToLower(filepath.Base(path))
-	full := strings.ToLower(filepath.ToSlash(path))
-	switch {
-	case strings.HasSuffix(lower, ".apk"):
-		return "android-apk"
-	case strings.HasSuffix(lower, ".ipa"):
-		return "ios-ipa"
-	case strings.HasSuffix(lower, ".xcresult"):
-		return "xcode-result"
-	case strings.HasSuffix(lower, ".log"):
-		return "log"
-	case strings.HasPrefix(lower, "lint-results") && strings.HasSuffix(lower, ".html"):
-		return "android-lint-report"
-	case strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg"):
-		if strings.Contains(full, "screenshot") || strings.Contains(full, "snapshot") {
-			return "screenshot"
-		}
-	case strings.HasSuffix(lower, ".xml"):
-		if strings.HasPrefix(lower, "lint-results") {
-			return "android-lint-report"
-		}
-		if strings.HasPrefix(lower, "test-") || strings.Contains(lower, "junit") || strings.Contains(full, "surefire-reports") || strings.Contains(full, "test-results") {
-			return "junit-xml"
+	return artifactKindWithConfig(path, defaultConfig())
+}
+
+func artifactKindWithConfig(path string, config CapsuleConfig) string {
+	kinds := make([]string, 0, len(config.Artifacts.Kinds))
+	for kind := range config.Artifacts.Kinds {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		if matchesAnyGlob(path, config.Artifacts.Kinds[kind]) {
+			return kind
 		}
 	}
 	return ""
@@ -943,6 +1267,38 @@ func parseRedactFlag(args []string) ([]string, bool, error) {
 	return filtered, redact, nil
 }
 
+func parseBundleOptions(args []string) ([]string, BundleOptions, error) {
+	var filtered []string
+	options := BundleOptions{}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--redact":
+			options.Redact = true
+		case "--include":
+			if i+1 >= len(args) {
+				return nil, options, errors.New("missing value for --include")
+			}
+			options.Include = append(options.Include, args[i+1])
+			i++
+		case "--exclude":
+			if i+1 >= len(args) {
+				return nil, options, errors.New("missing value for --exclude")
+			}
+			options.Exclude = append(options.Exclude, args[i+1])
+			i++
+		case "--no-artifacts":
+			options.Exclude = append(options.Exclude, "artifacts/**")
+		default:
+			if strings.HasPrefix(arg, "--") && arg != "--last" {
+				return nil, options, fmt.Errorf("unknown flag %q", arg)
+			}
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered, options, nil
+}
+
 func lastCapsuleID() (string, error) {
 	capsules, err := allCapsules()
 	if err != nil {
@@ -964,8 +1320,17 @@ func firstFailedCommand(session Session) *CommandRecord {
 }
 
 func summaryText(session Session, redact bool) string {
+	text, _ := summaryTextWithConfig(session, redact, defaultConfig())
+	return text
+}
+
+func summaryTextWithConfig(session Session, redact bool, config CapsuleConfig) (string, error) {
 	if redact {
-		session = redactSession(session)
+		redacted, err := redactSessionWithConfig(session, config)
+		if err != nil {
+			return "", err
+		}
+		session = redacted
 	}
 	var b strings.Builder
 	failed := firstFailedCommand(session)
@@ -985,12 +1350,21 @@ func summaryText(session Session, redact bool) string {
 		fmt.Fprintln(&b, "Failed: none")
 	}
 	fmt.Fprintf(&b, "Replay: capsule replay %s --rerun\n", session.ID)
-	return b.String()
+	return b.String(), nil
 }
 
 func agentBriefing(session Session, redact bool) string {
+	text, _ := agentBriefingWithConfig(session, redact, defaultConfig())
+	return text
+}
+
+func agentBriefingWithConfig(session Session, redact bool, config CapsuleConfig) (string, error) {
 	if redact {
-		session = redactSession(session)
+		redacted, err := redactSessionWithConfig(session, config)
+		if err != nil {
+			return "", err
+		}
+		session = redacted
 	}
 	failed := firstFailedCommand(session)
 	var b strings.Builder
@@ -1022,7 +1396,7 @@ func agentBriefing(session Session, redact bool) string {
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Start by reading manifest.json, commands.json, metadata.json, and the combined log before proposing a fix.")
 	fmt.Fprintln(&b, "Do not infer the failure from prose alone; inspect the recorded evidence first.")
-	return b.String()
+	return b.String(), nil
 }
 
 func writeSnapshotFiles(dest string, session Session) error {
@@ -1150,7 +1524,15 @@ func shortSHA(sha string) string {
 }
 
 func redactSession(session Session) Session {
-	redactor := newRedactor(session)
+	redacted, _ := redactSessionWithConfig(session, defaultConfig())
+	return redacted
+}
+
+func redactSessionWithConfig(session Session, config CapsuleConfig) (Session, error) {
+	redactor, err := newRedactorWithConfig(session, config)
+	if err != nil {
+		return session, err
+	}
 	session.Git.Repository = redactor.RedactText(session.Git.Repository)
 	session.Git.Status = redactor.RedactText(session.Git.Status)
 	session.Environment.Hostname = redactor.RedactText(session.Environment.Hostname)
@@ -1177,31 +1559,73 @@ func redactSession(session Session) Session {
 		session.Artifacts[i].Path = redactor.RedactText(session.Artifacts[i].Path)
 		session.Artifacts[i].CapsulePath = redactor.RedactText(session.Artifacts[i].CapsulePath)
 	}
-	return session
+	return session, nil
 }
 
 func newRedactor(session Session) Redactor {
+	redactor, _ := newRedactorWithConfig(session, defaultConfig())
+	return redactor
+}
+
+func newRedactorWithConfig(session Session, config CapsuleConfig) (Redactor, error) {
 	var replacements []stringPair
-	for _, candidate := range []string{
-		session.Environment.User,
-		session.Environment.Hostname,
-		session.Environment.CWD,
-		session.Git.Repository,
-		os.Getenv("HOME"),
-	} {
+	if redactionDefaultsEnabled(config) {
+		for _, candidate := range []string{
+			session.Environment.User,
+			session.Environment.Hostname,
+			session.Environment.CWD,
+			session.Git.Repository,
+			os.Getenv("HOME"),
+		} {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			replacements = append(replacements, stringPair{old: candidate, new: "[REDACTED]"})
+		}
+	}
+	for _, candidate := range config.Redaction.Literals {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" {
 			continue
 		}
 		replacements = append(replacements, stringPair{old: candidate, new: "[REDACTED]"})
 	}
+	for _, allowed := range config.Redaction.Allow {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		filtered := replacements[:0]
+		for _, replacement := range replacements {
+			if replacement.old != allowed {
+				filtered = append(filtered, replacement)
+			}
+		}
+		replacements = filtered
+	}
 	sort.Slice(replacements, func(i, j int) bool {
 		return len(replacements[i].old) > len(replacements[j].old)
 	})
-	return Redactor{
-		replacements: replacements,
-		tokenPattern: regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|github_pat|sk|rk|pat)_[A-Za-z0-9_\-]{8,}\b`),
+	patterns := []redactionPattern{}
+	if redactionDefaultsEnabled(config) {
+		patterns = append(patterns, redactionPattern{
+			pattern:     regexp.MustCompile(`(?i)\b(?:ghp|gho|ghu|github_pat|sk|rk|pat)_[A-Za-z0-9_\-]{8,}\b`),
+			replacement: "[REDACTED_TOKEN]",
+		})
 	}
+	for _, replacement := range config.Redaction.Replace {
+		compiled, err := regexp.Compile(replacement.Pattern)
+		if err != nil {
+			return Redactor{}, fmt.Errorf("invalid redaction pattern %q: %w", replacement.Pattern, err)
+		}
+		with := replacement.With
+		if with == "" {
+			with = "[REDACTED]"
+		}
+		patterns = append(patterns, redactionPattern{pattern: compiled, replacement: with})
+	}
+	return Redactor{replacements: replacements, patterns: patterns}, nil
 }
 
 func (r Redactor) RedactText(input string) string {
@@ -1211,21 +1635,18 @@ func (r Redactor) RedactText(input string) string {
 	}
 	output = strings.ReplaceAll(output, "/Users/[REDACTED]", "[REDACTED]")
 	output = strings.ReplaceAll(output, "/home/[REDACTED]", "[REDACTED]")
-	output = r.tokenPattern.ReplaceAllString(output, "[REDACTED_TOKEN]")
+	for _, pattern := range r.patterns {
+		output = pattern.pattern.ReplaceAllString(output, pattern.replacement)
+	}
 	return output
 }
 
 func shouldRedactFile(rel string) bool {
-	rel = filepath.ToSlash(rel)
-	base := filepath.Base(rel)
-	switch {
-	case strings.HasPrefix(rel, "logs/"):
-		return true
-	case strings.HasPrefix(rel, "artifacts/"):
-		return isTextPath(base)
-	default:
-		return base == "manifest.json" || base == "commands.json" || base == "metadata.json" || base == "session.json"
-	}
+	return shouldRedactFileWithConfig(rel, defaultConfig())
+}
+
+func shouldRedactFileWithConfig(rel string, config CapsuleConfig) bool {
+	return pathIncluded(rel, config.Redaction.Files.Include, config.Redaction.Files.Exclude)
 }
 
 func isTextPath(name string) bool {

@@ -702,7 +702,7 @@ func detectArtifacts(sessionID string, commandIndex int, since time.Time) ([]Art
 			return nil
 		}
 		info, err := d.Info()
-		if err != nil || info.ModTime().Before(since.Add(-time.Second)) {
+		if err != nil {
 			return nil
 		}
 		artifactName := fmt.Sprintf("%03d-%s", commandIndex, strings.ReplaceAll(filepath.ToSlash(clean), "/", "__"))
@@ -736,11 +736,16 @@ func artifactKind(path string) string {
 		return "xcode-result"
 	case strings.HasSuffix(lower, ".log"):
 		return "log"
+	case strings.HasPrefix(lower, "lint-results") && strings.HasSuffix(lower, ".html"):
+		return "android-lint-report"
 	case strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg"):
 		if strings.Contains(full, "screenshot") || strings.Contains(full, "snapshot") {
 			return "screenshot"
 		}
 	case strings.HasSuffix(lower, ".xml"):
+		if strings.HasPrefix(lower, "lint-results") {
+			return "android-lint-report"
+		}
 		if strings.HasPrefix(lower, "test-") || strings.Contains(lower, "junit") || strings.Contains(full, "surefire-reports") || strings.Contains(full, "test-results") {
 			return "junit-xml"
 		}

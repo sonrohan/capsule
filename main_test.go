@@ -10,6 +10,8 @@ func TestArtifactKind(t *testing.T) {
 		"reports/screenshots/login-failure.png":           "screenshot",
 		"logs/build.log":                                  "log",
 		"ios/build/app.ipa":                               "ios-ipa",
+		"app/build/reports/lint-results-debug.html":       "android-lint-report",
+		"app/build/reports/lint-results-debug.xml":        "android-lint-report",
 		"composeApp/src/main/res/drawable/background.png": "",
 	}
 

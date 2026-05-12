@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="rohan/capsule"
+REPO="sonrohan/capsule"
 BINARY="capsule"
 ARCHIVE="capsule_Darwin_all.tar.gz"
 INSTALL_DIR="${CAPSULE_INSTALL_DIR:-$HOME/.local/bin}"

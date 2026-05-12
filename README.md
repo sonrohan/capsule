@@ -37,7 +37,7 @@ or uncommitted files, those dependencies still need to exist when rerunning.
 macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rohan/capsule/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/sonrohan/capsule/main/install.sh | sh
 capsule --version
 capsule --help
 ```
@@ -58,7 +58,7 @@ support are welcome via pull request.
 Requires Go 1.22 or newer.
 
 ```sh
-go install github.com/rohan/capsule@latest
+go install github.com/sonrohan/capsule@latest
 ```
 
 From this repository:

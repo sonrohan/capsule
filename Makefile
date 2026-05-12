@@ -13,7 +13,9 @@ install:
 	case ":$$PATH:" in \
 		*":$$bin_dir:"*) echo "Run: capsule --help" ;; \
 		*) echo "Add $$bin_dir to PATH to run capsule from anywhere:"; \
-		   echo "  export PATH=\"$$bin_dir:$$PATH\"" ;; \
+		   echo "  echo 'export PATH=\"$$bin_dir:\$$PATH\"' >> ~/.zshrc"; \
+		   echo "Then reload your shell:"; \
+		   echo "  exec zsh" ;; \
 	esac
 
 test:
